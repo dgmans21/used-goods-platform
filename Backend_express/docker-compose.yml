@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  # Express 애플리케이션
+  app:
+    build: .
+    image: jm90hong/hib-express-ts-app:latest
+    container_name: hib-express-ts-app
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    restart: always
+    volumes:
+      # 개발 시 코드 변경 감지를 위한 볼륨 (선택사항)
+      - ./src:/app/src:ro
+      - ./prisma:/app/prisma:ro
