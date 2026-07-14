@@ -50,7 +50,7 @@ export default function ProductDetailPage() {
   }
 
   function handleConfirm() {
-    const result = applyProduct(product.id)
+    const result = applyProduct(product?.id ?? 0 as number)
     if (result.ok) {
       setDone(true)
       toast.success("신청이 완료되었습니다.")

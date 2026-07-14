@@ -1,6 +1,6 @@
 "use client"
 
-import axios from "axios"
+import axios, { AxiosError } from "axios"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
@@ -121,15 +121,32 @@ export default function SignupPage() {
 
       router.push("/login")
 
-    } catch (error) {
-      console.error(
-        "회원가입 실패:",
-        error
-      )
 
-      toast.error(
-        "회원가입에 실패했습니다."
-      )
+    
+    } catch (error) {
+      console.error("회원가입 실패:", error);
+    
+      // 기본 실패 메시지 설정
+      let errorMessage = "회원가입에 실패했습니다. 다시 시도해주세요.";
+    
+      // 백엔드(서버) 응답이 있는 경우
+      if (error instanceof AxiosError) {
+        const status = error.response?.status;
+    
+        if (status === 409 || status === 400) {
+          // 409 Conflict 또는 400 Bad Request: 이미 가입된 유저(중복 오류)
+          errorMessage = "이미 가입된 계정입니다. 다른 계정으로 시도해주세요.";
+        } else if (status && status >= 500) {
+          // 500 이상: 서버 시스템 자체의 오류
+          errorMessage = "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+        }
+      } else if (error instanceof AxiosError) {
+        // 요청은 보냈으나 서버로부터 아예 응답을 받지 못한 경우 (네트워크 다운 등)
+        errorMessage = "서버와 연결할 수 없습니다. 네트워크 상태를 확인해주세요.";
+      }
+    
+      // 최종 결정된 에러 메시지를 토스트로 출력
+      toast.error(errorMessage);
     }
   }
 
