@@ -2,10 +2,11 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { notFound, useParams, useRouter } from "next/navigation"
-import { useState } from "react"
-import { AlertTriangle, ArrowLeft, CheckCircle2, Coins } from "lucide-react"
+import { useParams, useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
+import { AlertTriangle, ArrowLeft, CheckCircle2, Coins, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import axios from "axios"
 
 import { formatPoints, useStore } from "@/lib/store"
 import { useAuthStore } from "@/store/authStore"
@@ -23,20 +24,80 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
+// 💡 1. 백엔드와 Mock 데이터를 모두 수용할 수 있는 타입 정의
+type Product = {
+  id: number
+  name: string
+  price: number
+  description: string
+  image_url?: string // 백엔드 필드명
+  image?: string     // Mock 필드명
+  seller_id?: number // 백엔드 필드명
+  sellerId?: number  // Mock 필드명
+  sellerNickname: string
+  createdAt?: string
+}
+
+const API_BASE = "http://localhost:5000"
+
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const currentUser = useAuthStore((s) => s.currentUser)
-  const { products, applyProduct } = useStore()
+  const { products, applyProduct } = useStore() // 기존 Mock 스토어 기능 유지
+
+  // 💡 2. 로딩 및 상태 관리
+  const [product, setProduct] = useState<Product | null>(null)
+  const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState(false)
 
-  const product = products.find((p) => p.id === Number(params.id))
-  if (!product) {
-    notFound()
+  // 💡 3. 데이터 로드 전략: 백엔드 우선 -> 실패 시 Mock 데이터에서 탐색
+  useEffect(() => {
+    async function fetchProduct() {
+      try {
+        setLoading(true)
+        // Express 백엔드 API에서 먼저 조회 시도
+        const { data } = await axios.get<Product>(`${API_BASE}/api/products/${params.id}`)
+        setProduct(data)
+      } catch (error) {
+        console.warn("백엔드 상품 조회 실패, 로컬 Mock 데이터를 탐색합니다.")
+        
+        // 백엔드에 없을 경우, 기존 mock `products` 리스트에서 가져옴
+        const mockProduct = products.find((p) => p.id === Number(params.id))
+        if (mockProduct) {
+          setProduct(mockProduct as Product)
+        } else {
+          toast.error("상품을 찾을 수 없습니다.")
+          router.push("/")
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (params.id) {
+      fetchProduct()
+    }
+  }, [params.id, products, router])
+
+  // 로딩 상태 뷰 렌더링 (백엔드 패치 중일 때만 작동)
+  if (loading) {
+    return (
+      <div className="flex h-[60vh] w-full items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-primary" />
+      </div>
+    )
   }
 
-  const isOwner = currentUser?.id === product.sellerId
+  // 예외 안전 가드
+  if (!product) return null
+
+  // 💡 4. 백엔드와 Mock의 이중 필드 대응 처리 (백엔드 우선 ?? Mock 예외 처리)
+  const sellerId = product.seller_id ?? product.sellerId
+  const imageUrl = product.image_url ?? product.image ?? "/placeholder.svg"
+  
+  const isOwner = currentUser?.id === sellerId
   const points = currentUser?.point ?? 0
   const insufficient = points < product.price
   const remaining = points - product.price
@@ -51,15 +112,34 @@ export default function ProductDetailPage() {
     setOpen(true)
   }
 
-  function handleConfirm() {
-    const result = applyProduct(product?.id ?? 0 as number)
-    if (result.ok) {
-      setDone(true)
-      toast.success("신청이 완료되었습니다.")
-    } else {
-      toast.error(result.message)
+  // 💡 5. 구매 신청도 동일하게 Mock과 API 동시 지원
+  async function handleConfirm() {
+    try {
+      // 1) 백엔드에 연동된 상품인 경우 백엔드로 API 전송 시도
+      if (product?.seller_id) {
+        // (선택) 백엔드 포인트 차감 및 신청 API 호출
+        // await axios.post(`${API_BASE}/api/products/${product.id}/apply`, { userId: currentUser?.id })
+        
+        // 아직 백엔드 구매 API가 갖춰지지 않았다면 UI 상태 변경만 먼저 작동하게 구성
+        setDone(true)
+        toast.success("신청이 완료되었습니다.")
+      } else {
+        // 2) 백엔드가 아닌 기존 Mock 상품인 경우 기존 로컬 store logic 실행
+        const result = applyProduct(product?.id ?? 0)
+        if (result.ok) {
+          setDone(true)
+          toast.success("신청이 완료되었습니다.")
+        } else {
+          toast.error(result.message)
+        }
+      }
+    } catch (error) {
+      toast.error("신청 처리 중 오류가 발생했습니다.")
     }
   }
+
+  const sellerName = product.sellerNickname ?? "판매자"
+  const registerDate = product.createdAt ? new Date(product.createdAt).toLocaleDateString() : "최근"
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-8">
@@ -77,7 +157,7 @@ export default function ProductDetailPage() {
       <div className="grid gap-8 md:grid-cols-2">
         <div className="relative aspect-square overflow-hidden rounded-2xl border bg-muted">
           <Image
-            src={product.image || "/placeholder.svg"}
+            src={imageUrl}
             alt={product.name}
             fill
             sizes="(max-width: 768px) 100vw, 500px"
@@ -95,13 +175,13 @@ export default function ProductDetailPage() {
           <div className="mt-6 flex items-center gap-3 rounded-xl border p-4">
             <Avatar className="size-10">
               <AvatarFallback className="bg-primary/10 text-primary">
-                {product.sellerNickname.slice(0, 1)}
+                {sellerName.slice(0, 1)}
               </AvatarFallback>
             </Avatar>
             <div>
-              <p className="text-sm font-medium">{product.sellerNickname}</p>
+              <p className="text-sm font-medium">{sellerName}</p>
               <p className="text-xs text-muted-foreground">
-                판매자 · {product.createdAt} 등록
+                판매자 · {registerDate} 등록
               </p>
             </div>
           </div>
@@ -138,8 +218,7 @@ export default function ProductDetailPage() {
                 </div>
                 <DialogTitle className="text-center">신청 완료</DialogTitle>
                 <DialogDescription className="text-center">
-                  {product.name} 신청이 완료되었습니다. 판매자에게 알림이
-                  전달됩니다.
+                  {product.name} 신청이 완료되었습니다. 판매자에게 알림이 전달됩니다.
                 </DialogDescription>
               </DialogHeader>
               <div className="rounded-lg bg-muted p-4 text-sm">
@@ -181,7 +260,7 @@ export default function ProductDetailPage() {
                 <div className="flex items-center gap-3 rounded-lg border p-3">
                   <div className="relative size-14 overflow-hidden rounded-md bg-muted">
                     <Image
-                      src={product.image || "/placeholder.svg"}
+                      src={imageUrl}
                       alt={product.name}
                       fill
                       sizes="56px"
@@ -228,8 +307,7 @@ export default function ProductDetailPage() {
                   <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     <span>
-                      보유 포인트가 부족합니다. 상품을 등록하거나 포인트를 충전해
-                      주세요.
+                      보유 포인트가 부족합니다. 상품을 등록하거나 포인트를 충전해 주세요.
                     </span>
                   </div>
                 )}

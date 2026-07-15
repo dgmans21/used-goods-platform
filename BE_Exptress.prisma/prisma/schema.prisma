@@ -20,6 +20,23 @@ model user {
   is_active  user_is_active?
   user_lat   Float?
   user_lng   Float?
+  product    product[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model product {
+  id          Int       @id @default(autoincrement())
+  name        String    @db.VarChar(300)
+  price       Int
+  description String    @db.Text
+  image_url   String    @db.VarChar(1000)
+  status      String    @default("sale") @db.VarChar(20)
+  created_at  DateTime? @default(now()) @db.DateTime(0)
+  updated_at  DateTime? @default(now()) @db.DateTime(0)
+  seller_id   Int
+  user        user      @relation(fields: [seller_id], references: [id], onDelete: Cascade, map: "FK_Product_User")
+
+  @@index([seller_id], map: "FK_Product_User")
 }
 
 enum user_is_active {
