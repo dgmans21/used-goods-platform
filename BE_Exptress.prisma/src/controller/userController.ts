@@ -161,4 +161,96 @@ export const getKakaoLatLngFunction = async (address: string) => {
     const data = await response.json() as {documents: {y: number, x: number}[]};
     return data.documents[0];
 };
+export const login = async (req: Request, res: Response) => {
+  try {
+    const { user_id, pw } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { user_id },
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        message: "존재하지 않는 아이디입니다.",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(pw, user.pw as string);
+
+    if (!isMatch) {
+      return res.status(401).json({
+        message: "비밀번호가 일치하지 않습니다.",
+      });
+    }
+
+    return res.status(200).json({
+      message: "로그인 성공",
+      data: {
+        id: user.id,
+        user_id: user.user_id,
+        nickname: user.nickname,
+        address: user.address,
+        address2: user.address2,
+        point: user.point ?? 0,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        is_active: user.is_active,
+        user_lat: user.user_lat,
+        user_lng: user.user_lng,
+      },
+    });
+  } catch (error) {
+    console.error("로그인 오류:", error);
+
+    return res.status(500).json({
+      message: "로그인 중 오류가 발생했습니다.",
+    });
+  }
+};
+export const loginFunction = async (req: Request, res: Response) => {
+    try {
+      const { user_id, pw } = req.body;
+  
+      const user = await prisma.user.findUnique({
+        where: { user_id },
+      });
+  
+      if (!user) {
+        return res.status(401).json({
+          message: "존재하지 않는 아이디입니다.",
+        });
+      }
+  
+      const isMatch = await bcrypt.compare(pw, user.pw as string);
+  
+      if (!isMatch) {
+        return res.status(401).json({
+          message: "비밀번호가 일치하지 않습니다.",
+        });
+      }
+  
+      return res.status(200).json({
+        message: "로그인 성공",
+        data: {
+          id: user.id,
+          user_id: user.user_id,
+          nickname: user.nickname,
+          address: user.address,
+          address2: user.address2,
+          point: user.point ?? 0,
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+          is_active: user.is_active,
+          user_lat: user.user_lat,
+          user_lng: user.user_lng,
+        },
+      });
+    } catch (error) {
+      console.error("로그인 오류:", error);
+  
+      return res.status(500).json({
+        message: "로그인 중 오류가 발생했습니다.",
+      });
+    }
+  };
 

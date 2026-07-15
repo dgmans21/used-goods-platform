@@ -1,17 +1,8 @@
-export type User = {
-  idx: number
-  email: string
-  nickname: string
-  points: number
-  address: string
-  addressDetail: string
-}
-
 export type Product = {
   id: number
   image: string
   name: string
-  sellerIdx: number
+  sellerId: number
   sellerNickname: string
   price: number
   description: string

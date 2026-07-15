@@ -6,7 +6,8 @@ import { Coins, LogOut, Menu, PlusCircle, Store, User } from "lucide-react"
 import { useState } from "react"
 
 import { cn } from "@/lib/utils"
-import { formatPoints, useStore } from "@/lib/store"
+import { formatPoints } from "@/lib/store"
+import { useAuthStore } from "@/store/authStore"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -20,8 +21,9 @@ const navLinks = [
 export function Navbar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { currentUser, logout } = useStore()
   const [open, setOpen] = useState(false)
+  const currentUser = useAuthStore((state) => state.currentUser)
+  const logout = useAuthStore((state) => state.logout)
 
   function handleLogout() {
     logout()
@@ -66,7 +68,7 @@ export function Navbar() {
             <>
               <Badge variant="secondary" className="gap-1 py-1.5">
                 <Coins className="size-3.5" />
-                {formatPoints(currentUser.points)}
+                {formatPoints(currentUser.point)}
               </Badge>
               <Link
                 href="/mypage"
@@ -126,7 +128,7 @@ export function Navbar() {
                 </div>
                 <Badge variant="secondary" className="gap-1">
                   <Coins className="size-3.5" />
-                  {formatPoints(currentUser.points)}
+                  {formatPoints(currentUser.point)}
                 </Badge>
               </div>
             )}

@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Coins, MapPin, Package, Receipt } from "lucide-react"
 
 import { formatPoints, useStore } from "@/lib/store"
+import { useAuthStore } from "@/store/authStore"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +18,8 @@ import {
 import { ProductCard } from "@/components/product-card"
 
 export default function MyPage() {
-  const { currentUser, products, applications } = useStore()
+  const currentUser = useAuthStore((s) => s.currentUser)
+  const { products, applications } = useStore()
 
   if (!currentUser) {
     return (
@@ -33,7 +35,7 @@ export default function MyPage() {
     )
   }
 
-  const myProducts = products.filter((p) => p.sellerIdx === currentUser.idx)
+  const myProducts = products.filter((p) => p.sellerId === currentUser.id)
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-8">
@@ -50,11 +52,11 @@ export default function MyPage() {
             <div className="flex flex-col gap-1">
               <p className="text-lg font-bold">{currentUser.nickname}</p>
               <p className="text-sm text-muted-foreground">
-                {currentUser.email}
+                {currentUser.user_id}
               </p>
               <p className="flex items-center gap-1 text-sm text-muted-foreground">
                 <MapPin className="size-3.5" />
-                {currentUser.address} {currentUser.addressDetail}
+                {currentUser.address} {currentUser.address2}
               </p>
             </div>
           </CardContent>
@@ -67,7 +69,7 @@ export default function MyPage() {
               보유 포인트
             </span>
             <p className="text-3xl font-bold">
-              {formatPoints(currentUser.points)}
+              {formatPoints(currentUser.point)}
             </p>
           </CardContent>
         </Card>

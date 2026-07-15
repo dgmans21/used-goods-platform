@@ -1,39 +1,31 @@
 "use client"
 
-import {
-  createContext,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react"
-import type { Application, Product, User } from "@/lib/types"
+import { create } from "zustand"
 
-const INITIAL_USERS: User[] = [
-  {
-    idx: 1,
-    email: "hana@example.com",
-    nickname: "하나마켓",
-    points: 120000,
-    address: "대구광역시 수성구 달구벌대로",
-    addressDetail: "101동 1201호",
-  },
-  {
-    idx: 2,
-    email: "minjun@example.com",
-    nickname: "민준상점",
-    points: 80000,
-    address: "대구광역시 수성구 동대구로",
-    addressDetail: "202동 803호",
-  },
-]
+import type { Application, Product } from "@/lib/types"
+import { useAuthStore } from "@/store/authStore"
+import type { User } from "@/types/user"
+
+type AddProductInput = {
+  image: string
+  name: string
+  price: number
+  description: string
+}
+
+type MarketState = {
+  products: Product[]
+  applications: Application[]
+  addProduct: (input: AddProductInput) => Product | null
+  applyProduct: (productId: number) => { ok: boolean; message: string }
+}
 
 const INITIAL_PRODUCTS: Product[] = [
   {
     id: 1,
     image: "/products/earphones.png",
     name: "무선 노이즈캔슬링 이어폰",
-    sellerIdx: 2,
+    sellerId: 2,
     sellerNickname: "민준상점",
     price: 89000,
     description:
@@ -44,7 +36,7 @@ const INITIAL_PRODUCTS: Product[] = [
     id: 2,
     image: "/products/camping-chair.png",
     name: "접이식 캠핑 의자",
-    sellerIdx: 1,
+    sellerId: 1,
     sellerNickname: "하나마켓",
     price: 32000,
     description:
@@ -55,7 +47,7 @@ const INITIAL_PRODUCTS: Product[] = [
     id: 3,
     image: "/products/bookshelf.png",
     name: "원목 4단 책장",
-    sellerIdx: 2,
+    sellerId: 2,
     sellerNickname: "민준상점",
     price: 55000,
     description:
@@ -66,7 +58,7 @@ const INITIAL_PRODUCTS: Product[] = [
     id: 4,
     image: "/products/air-purifier.png",
     name: "미니 공기청정기",
-    sellerIdx: 1,
+    sellerId: 1,
     sellerNickname: "하나마켓",
     price: 45000,
     description:
@@ -77,7 +69,7 @@ const INITIAL_PRODUCTS: Product[] = [
     id: 5,
     image: "/products/road-bike.png",
     name: "입문용 로드 자전거",
-    sellerIdx: 2,
+    sellerId: 2,
     sellerNickname: "민준상점",
     price: 210000,
     description:
@@ -88,7 +80,7 @@ const INITIAL_PRODUCTS: Product[] = [
     id: 6,
     image: "/products/floor-lamp.png",
     name: "모던 스탠드 조명",
-    sellerIdx: 1,
+    sellerId: 1,
     sellerNickname: "하나마켓",
     price: 38000,
     description:
@@ -97,163 +89,76 @@ const INITIAL_PRODUCTS: Product[] = [
   },
 ]
 
-type SignupInput = {
-  email: string
-  nickname: string
-  address: string
-  addressDetail: string
-}
+export const useStore = create<MarketState>()((set, get) => ({
+  products: INITIAL_PRODUCTS,
+  applications: [],
 
-type AddProductInput = {
-  image: string
-  name: string
-  price: number
-  description: string
-}
+  addProduct(input) {
+    const currentUser = useAuthStore.getState().currentUser
+    if (!currentUser) return null
 
-type StoreContextValue = {
-  currentUser: User | null
-  users: User[]
-  products: Product[]
-  applications: Application[]
-  login: (email: string) => boolean
-  loginWithGoogle: () => void
-  signup: (input: SignupInput) => void
-  logout: () => void
-  addProduct: (input: AddProductInput) => Product | null
-  applyProduct: (productId: number) => { ok: boolean; message: string }
-}
-
-const StoreContext = createContext<StoreContextValue | null>(null)
-
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS)
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS)
-  const [applications, setApplications] = useState<Application[]>([])
-  const [currentUser, setCurrentUser] = useState<User | null>(INITIAL_USERS[0])
-
-  const value = useMemo<StoreContextValue>(() => {
-    function login(email: string) {
-      const found = users.find((u) => u.email === email)
-      if (found) {
-        setCurrentUser(found)
-        return true
-      }
-      return false
+    const { products } = get()
+    const newProduct: Product = {
+      id: products.length > 0 ? Math.max(...products.map((p) => p.id)) + 1 : 1,
+      image: input.image || "/placeholder.svg",
+      name: input.name,
+      sellerId: currentUser.id,
+      sellerNickname: currentUser.nickname,
+      price: input.price,
+      description: input.description,
+      createdAt: new Date().toISOString().slice(0, 10),
     }
 
-    function loginWithGoogle() {
-      const google: User = {
-        idx: 999,
-        email: "google.user@gmail.com",
-        nickname: "구글사용자",
-        points: 50000,
-        address: "대구광역시 수성구",
-        addressDetail: "",
-      }
-      setUsers((prev) =>
-        prev.some((u) => u.idx === google.idx) ? prev : [...prev, google],
-      )
-      setCurrentUser(google)
+    set({ products: [newProduct, ...products] })
+    return newProduct
+  },
+
+  applyProduct(productId) {
+    const currentUser = useAuthStore.getState().currentUser
+    const { products, applications } = get()
+
+    if (!currentUser) {
+      return { ok: false, message: "로그인이 필요합니다." }
     }
 
-    function signup(input: SignupInput) {
-      setUsers((prev) => {
-        const nextIdx = Math.max(0, ...prev.map((u) => u.idx)) + 1
-        const newUser: User = {
-          idx: nextIdx,
-          email: input.email,
-          nickname: input.nickname,
-          points: 100000,
-          address: input.address,
-          addressDetail: input.addressDetail,
-        }
-        setCurrentUser(newUser)
-        return [...prev, newUser]
-      })
+    const product = products.find((p) => p.id === productId)
+    if (!product) {
+      return { ok: false, message: "상품을 찾을 수 없습니다." }
     }
 
-    function logout() {
-      setCurrentUser(null)
+    if (product.sellerId === currentUser.id) {
+      return { ok: false, message: "본인이 등록한 상품입니다." }
     }
 
-    function addProduct(input: AddProductInput) {
-      if (!currentUser) return null
-      const newProduct: Product = {
-        id: Math.max(0, ...products.map((p) => p.id)) + 1,
-        image: input.image || "/placeholder.svg?height=600&width=600",
-        name: input.name,
-        sellerIdx: currentUser.idx,
-        sellerNickname: currentUser.nickname,
-        price: input.price,
-        description: input.description,
-        createdAt: new Date().toISOString().slice(0, 10),
-      }
-      setProducts((prev) => [newProduct, ...prev])
-      return newProduct
+    if (currentUser.point < product.price) {
+      return { ok: false, message: "포인트가 부족합니다." }
     }
 
-    function applyProduct(productId: number) {
-      if (!currentUser) {
-        return { ok: false, message: "로그인이 필요합니다." }
-      }
-      const product = products.find((p) => p.id === productId)
-      if (!product) {
-        return { ok: false, message: "상품을 찾을 수 없습니다." }
-      }
-      if (product.sellerIdx === currentUser.idx) {
-        return { ok: false, message: "본인이 등록한 상품은 신청할 수 없습니다." }
-      }
-      if (currentUser.points < product.price) {
-        return { ok: false, message: "보유 포인트가 부족합니다." }
-      }
+    const updatedUser: User = {
+      ...currentUser,
+      point: currentUser.point - product.price,
+    }
 
-      const updatedUser = {
-        ...currentUser,
-        points: currentUser.points - product.price,
-      }
-      setCurrentUser(updatedUser)
-      setUsers((prev) =>
-        prev.map((u) => (u.idx === updatedUser.idx ? updatedUser : u)),
-      )
-      setApplications((prev) => [
+    useAuthStore.getState().setCurrentUser(updatedUser)
+
+    set({
+      applications: [
         {
-          id: prev.length + 1,
+          id: applications.length + 1,
           productId: product.id,
           productName: product.name,
           price: product.price,
           appliedAt: new Date().toISOString().slice(0, 10),
         },
-        ...prev,
-      ])
-      return { ok: true, message: "신청이 완료되었습니다." }
-    }
+        ...applications,
+      ],
+    })
 
-    return {
-      currentUser,
-      users,
-      products,
-      applications,
-      login,
-      loginWithGoogle,
-      signup,
-      logout,
-      addProduct,
-      applyProduct,
-    }
-  }, [currentUser, users, products, applications])
+    return { ok: true, message: "신청 완료" }
+  },
+}))
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
-}
-
-export function useStore() {
-  const ctx = useContext(StoreContext)
-  if (!ctx) {
-    throw new Error("useStore must be used within StoreProvider")
-  }
-  return ctx
-}
-
-export function formatPoints(value: number) {
-  return `${value.toLocaleString("ko-KR")}P`
+export function formatPoints(value: number | undefined | null) {
+  const safeValue = value ?? 0
+  return `${safeValue.toLocaleString("ko-KR")}P`
 }

@@ -8,6 +8,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Coins } from "lucide-react"
 import { toast } from "sonner"
 
 import { formatPoints, useStore } from "@/lib/store"
+import { useAuthStore } from "@/store/authStore"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -25,7 +26,8 @@ import {
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
-  const { products, currentUser, applyProduct } = useStore()
+  const currentUser = useAuthStore((s) => s.currentUser)
+  const { products, applyProduct } = useStore()
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState(false)
 
@@ -34,8 +36,8 @@ export default function ProductDetailPage() {
     notFound()
   }
 
-  const isOwner = currentUser?.idx === product.sellerIdx
-  const points = currentUser?.points ?? 0
+  const isOwner = currentUser?.id === product.sellerId
+  const points = currentUser?.point ?? 0
   const insufficient = points < product.price
   const remaining = points - product.price
 
@@ -150,7 +152,7 @@ export default function ProductDetailPage() {
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-muted-foreground">남은 포인트</span>
                   <span className="font-semibold text-primary">
-                    {formatPoints(currentUser?.points ?? 0)}
+                    {formatPoints(currentUser?.point ?? 0)}
                   </span>
                 </div>
               </div>

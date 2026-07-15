@@ -8,6 +8,7 @@ import { ImagePlus, Link2, Lock, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { useStore } from "@/lib/store"
+import { useAuthStore } from "@/store/authStore"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -36,7 +37,8 @@ type Errors = {
 
 export default function SellPage() {
   const router = useRouter()
-  const { currentUser, addProduct } = useStore()
+  const currentUser = useAuthStore((s) => s.currentUser)
+  const addProduct = useStore((s) => s.addProduct)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [mode, setMode] = useState<"upload" | "url">("upload")

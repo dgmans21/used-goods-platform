@@ -2,9 +2,9 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Noto_Sans_KR } from 'next/font/google'
 import './globals.css'
-import { StoreProvider } from '@/lib/store'
 import { Navbar } from '@/components/navbar'
 import { Toaster } from '@/components/ui/sonner'
+import AuthGuard from '@/components/AuthGuard'
 
 const notoSansKr = Noto_Sans_KR({
   subsets: ['latin'],
@@ -32,13 +32,13 @@ export default function RootLayout({
   return (
     <html lang="ko" className="bg-background">
       <body className={`${notoSansKr.variable} font-sans antialiased`}>
-        <StoreProvider>
+        <AuthGuard>
           <div className="flex min-h-screen flex-col">
             <Navbar />
             <div className="flex-1">{children}</div>
           </div>
           <Toaster position="top-center" richColors />
-        </StoreProvider>
+        </AuthGuard>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
