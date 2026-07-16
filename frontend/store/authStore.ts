@@ -17,11 +17,15 @@ type AuthState = {
   loginWithGoogle: () => Promise<boolean>
   signup: (input: SignupInput) => Promise<boolean>
   logout: () => void
+  
+  // 🚀 포인트 상태 변경 및 충전 액션
+  updatePoint: (newPoint: number) => void
+  chargePoints: (amount: number) => Promise<number>
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       currentUser: null,
 
       setCurrentUser(user) {
@@ -102,9 +106,51 @@ export const useAuthStore = create<AuthState>()(
         set({ currentUser: null })
         void useAuthStore.persist.clearStorage()
       },
+
+      // 🚀 안전하게 포인트 상태만 갱신하는 단순 상태 동기화 액션
+      updatePoint(newPoint) {
+        const user = get().currentUser
+        if (user) {
+          set({
+            currentUser: {
+              ...user,
+              point: newPoint,
+            },
+          })
+        }
+      },
+
+      // 🚀 [포인트 충전 비즈니스 로직]
+      async chargePoints(amount) {
+        const state = get()
+        const user = state.currentUser
+        
+        if (!user || !user.id) {
+          throw new Error("로그인 정보가 올바르지 않습니다.")
+        }
+
+        try {
+          // Express 백엔드 서버에 실제 충전 API 요청 전송
+          const response = await axios.post(`${API_BASE}/api/applications/charge`, {
+            userId: Number(user.id),
+            amount: amount,
+          })
+
+          const updatedPoint = response.data.point
+
+          // 내부의 updatePoint를 호출하여 안전하게 싱크 맞춤
+          get().updatePoint(updatedPoint)
+
+          return updatedPoint
+        } catch (err: any) {
+          const errMsg = err.response?.data?.error || "포인트 충전 중 오류가 발생했습니다."
+          throw new Error(errMsg)
+        }
+      },
     }),
     {
-      name: "auth-storage",
+      // ⚠️ [중요] 키 이름 중복 방지를 위해 유니크하게 이름 변경!
+      name: "user-auth-session", 
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ currentUser: state.currentUser }),
     },

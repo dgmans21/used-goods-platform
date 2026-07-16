@@ -3,11 +3,12 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Coins, LogOut, Menu, PlusCircle, Store, User } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { cn } from "@/lib/utils"
 import { formatPoints } from "@/lib/store"
-import { useAuthStore } from "@/store/authStore"
+import { useAuthStore } from "@/store/authStore" // 🚀 오직 authStore만 사용합니다.
+
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -22,6 +23,8 @@ export function Navbar() {
   const pathname = usePathname()
   const router = useRouter()
   const [open, setOpen] = useState(false)
+  
+  // 🚀 authStore에서 현재 사용자 세션 정보를 구독합니다.
   const currentUser = useAuthStore((state) => state.currentUser)
   const logout = useAuthStore((state) => state.logout)
 
@@ -30,6 +33,14 @@ export function Navbar() {
     setOpen(false)
     router.push("/login")
   }
+  const [isMounted, setIsMounted] = useState(false)
+
+  useEffect(() => {
+    setIsMounted(true) // 브라우저 로드가 끝난 시점에 true로 변경
+  }, [])
+
+  // 아직 브라우저 로드가 끝나지 않았다면 (서버 렌더링 중이라면) 아예 배지를 그리지 않거나 로딩 상태를 보냄
+  const point = isMounted ? (currentUser?.point ?? 0) : 0
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur">
@@ -66,9 +77,10 @@ export function Navbar() {
         <div className="hidden items-center gap-3 md:flex">
           {currentUser ? (
             <>
+              {/* 🚀 데스크톱 포인트 배지: 통합된 authStore의 currentUser.point를 다이렉트로 구독 */}
               <Badge variant="secondary" className="gap-1 py-1.5">
                 <Coins className="size-3.5" />
-                {formatPoints(currentUser.point)}
+                {formatPoints(currentUser.point ?? 0)} 
               </Badge>
               <Link
                 href="/mypage"
@@ -125,12 +137,14 @@ export function Navbar() {
                   <span className="text-sm font-medium">
                     {currentUser.nickname}
                   </span>
-                </div>
-                <Badge variant="secondary" className="gap-1">
-                  <Coins className="size-3.5" />
-                  {formatPoints(currentUser.point)}
-                </Badge>
-              </div>
+                    </div>
+                          {/* 🚀 모바일 메뉴 포인트 배지: 통합된 authStore의 currentUser.point를 다이렉트로 구독 */}
+                          <Badge variant="secondary" className="gap-1">
+                            <Coins className="size-3.5" />
+                            {/* 💡 currentUser가 null일 때 터지는 문제를 방지하기 위해 ?.과 ?? 0을 사용합니다. */}
+                            {formatPoints(currentUser?.point ?? 0)}
+                          </Badge>
+                    </div>
             )}
             {navLinks.map((link) => (
               <Button

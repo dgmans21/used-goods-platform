@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUsers, createUser, checkUserId, validatePassword, login} from '../controller/userController';
+import { getUsers, createUser, checkUserId, validatePassword, login, googleLogin } from '../controller/userController';
 
 const router = Router();
 
@@ -8,4 +8,5 @@ router.post('/createUser', createUser);
 router.post('/checkUserId', checkUserId);
 router.post('/validatePassword', validatePassword);
 router.post('/login', login);
+router.post('/google', googleLogin);
 export default router;

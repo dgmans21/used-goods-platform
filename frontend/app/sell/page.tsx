@@ -1,9 +1,10 @@
 "use client"
 
+
 import Image from "next/image"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
 import { ImagePlus, Link2, Lock, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 import axios from "axios" // 👈 백엔드 연동용 axios 임포트 추가
@@ -19,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
 import { storage } from "@/lib/firebase"
+
 
 import {
   Card,
@@ -58,6 +60,9 @@ export default function SellPage() {
   const [price, setPrice] = useState("")
   const [description, setDescription] = useState("")
   const [errors, setErrors] = useState<Errors>({})
+  const searchParams = useSearchParams()
+  const isEditMode = searchParams.get("edit") === "true"
+  const productId = searchParams.get("id")
 
   // 미로그인 상태 가드 락 체킹
   if (!currentUser) {
@@ -137,54 +142,104 @@ export default function SellPage() {
 
   const currentImage = imageUrl // 업로드든 URL 입력이든 최종 주소는 imageUrl 하나로 통일
 
+  useEffect(() => {
+    if (isEditMode && productId) {
+      axios.get(`http://localhost:5000/api/products/${productId}`)
+        .then(({ data }) => {
+          setName(data.name)
+          setPrice(data.price.toString())
+          setDescription(data.description || "")
+          
+          // 🔥 불러온 이미지 주소 세팅
+          setImageUrl(data.image_url || "")
+          
+          if (data.image_url) {
+            setPreview(data.image_url) // 이미지 미리보기 활성화
+            
+            // 만약 HTTP 주소 형식이라면 모드를 맞게 변환
+            if (data.image_url.startsWith("http")) {
+              setMode("url")
+            } else {
+              setMode("upload")
+            }
+          }
+        })
+        .catch((err) => {
+          console.error(err)
+          toast.error("기존 상품 정보를 불러오는데 실패했습니다.")
+        })
+    }
+  }, [isEditMode, productId])
   function handleClearImage() {
     setPreview("")
     setImageUrl("")
+    // 만약 currentImage 상태가 별도로 존재한다면 함께 비워줍니다.
+    if (typeof setImageUrl === "function") {
+      setImageUrl("")
+    }
     if (fileRef.current) fileRef.current.value = ""
   }
+  
 
   // 🚀최종 폼 데이터 전송 (Express 연동 완료)
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    
-    if (isUploading) {
-      toast.error("이미지 업로드가 진행 중입니다. 잠시만 기다려 주세요.")
-      return
-    }
+ // 🚀최종 폼 데이터 전송 (Express 등록/수정 완벽 대응)
+async function handleSubmit(e: React.FormEvent) {
+  e.preventDefault()
+  
+  if (isUploading) {
+    toast.error("이미지 업로드가 진행 중입니다. 잠시만 기다려 주세요.")
+    return
+  }
 
-    const next: Errors = {}
-    if (!currentImage) next.image = "상품 이미지를 등록해 주세요."
-    if (name.trim().length < 2) next.name = "상품명을 2자 이상 입력해 주세요."
-    const priceNum = Number(price)
-    if (!price || Number.isNaN(priceNum) || priceNum <= 0) {
-      next.price = "올바른 가격(포인트)을 입력해 주세요."
-    }
-    if (description.trim().length < 10) {
-      next.description = "상세설명을 10자 이상 입력해 주세요."
-    }
-    setErrors(next)
-    if (Object.keys(next).length > 0) return
+  // 💡 상태 변수 체크 (imageUrl과 currentImage 중 실제 폼에 채워진 변수 사용)
+  const targetImage = imageUrl || currentImage
 
-    try {
-      // Zustand 스토어 대신 Express 실제 백엔드 호출
-      const response = await axios.post("http://localhost:5000/api/products", {
-        name: name.trim(),
-        price: priceNum,
-        description: description.trim(),
-        image_url: currentImage,       
-        // 💡 currentUser를 any형태로 단언하여 타입 검사를 건너뛰고 강제로 id를 참조합니다.
-        seller_id: Number((currentUser as any).id) 
-      });
+  const next: Errors = {}
+  if (!targetImage) next.image = "상품 이미지를 등록해 주세요."
+  if (name.trim().length < 2) next.name = "상품명을 2자 이상 입력해 주세요."
+  
+  const priceNum = Number(price)
+  if (!price || Number.isNaN(priceNum) || priceNum <= 0) {
+    next.price = "올바른 가격(포인트)을 입력해 주세요."
+  }
+  if (description.trim().length < 10) {
+    next.description = "상세설명을 10자 이상 입력해 주세요."
+  }
+  setErrors(next)
+  if (Object.keys(next).length > 0) return
+
+  const payload = {
+    name: name.trim(),
+    price: priceNum,
+    description: description.trim(),
+    image_url: targetImage,       
+    seller_id: Number(currentUser?.id as number) 
+  }
+
+  try {
+    if (isEditMode && productId) {
+      // ✏️ [수정모드] PUT http://localhost:5000/api/products/:id 호출
+      const response = await axios.put(`http://localhost:5000/api/products/${productId}`, payload)
+      
+      if (response.status === 200) {
+        toast.success("상품이 성공적으로 수정되었습니다.")
+        router.push(`/products/${productId}`)
+        router.refresh()
+      }
+    } else {
+      // 🚀 [등록모드] POST http://localhost:5000/api/products 호출
+      const response = await axios.post("http://localhost:5000/api/products", payload)
       
       if (response.status === 201 && response.data) {
         toast.success("상품이 등록되었습니다.")
-        router.push(`/products/${response.data.id}`) // MariaDB가 생성한 실제 고유 id페이지로 리다이렉트
+        router.push(`/products/${response.data.id}`)
       }
-    } catch (error) {
-      console.error("Express 서버 등록 실패:", error)
-      toast.error("서버 통신 중 오류가 발생했습니다. 다시 시도해 주세요.")
     }
+  } catch (error) {
+    console.error("Express 서버 통신 실패:", error)
+    toast.error("서버 통신 중 오류가 발생했습니다. 다시 시도해 주세요.")
   }
+}
 
   return (
     // 👈 잘려있던 상단 레이아웃 메인 루트 복구 완료

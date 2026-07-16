@@ -101,7 +101,24 @@ export default function ProductDetailPage() {
   const points = currentUser?.point ?? 0
   const insufficient = points < product.price
   const remaining = points - product.price
+// 🗑️ 상품 삭제 처리 함수
+async function handleDelete() {
+  if (!confirm("정말로 이 상품을 삭제하시겠습니까?")) return
 
+  try {
+    if (product?.seller_id) {
+      // 백엔드 삭제 API 호출
+      await axios.delete(`${API_BASE}/api/products/${product.id}`)
+      toast.success("상품이 정상적으로 삭제되었습니다.")
+      router.push("/")
+    } else {
+      toast.error("로컬 테스트용 데이터는 삭제할 수 없습니다.")
+    }
+  } catch (error) {
+    console.error(error)
+    toast.error("상품 삭제 중 오류가 발생했습니다.")
+  }
+}
   function handleApplyClick() {
     if (!currentUser) {
       toast.error("로그인이 필요합니다.")
@@ -184,21 +201,37 @@ export default function ProductDetailPage() {
                 판매자 · {registerDate} 등록
               </p>
             </div>
+          
           </div>
-
-          <Separator className="my-6" />
-
-          <h2 className="mb-2 text-sm font-semibold">상품 설명</h2>
+          <div><Separator className="my-6" />
+            <h2 className="mb-2 text-sm font-semibold">상품 설명</h2>
           <p className="leading-relaxed whitespace-pre-line text-muted-foreground">
             {product.description}
           </p>
+          </div>
 
           <div className="mt-8">
             {isOwner ? (
-              <Badge variant="secondary" className="py-2">
-                내가 등록한 상품입니다
-              </Badge>
+              // 💡 내가 등록한 상품일 때: 수정하기 / 삭제하기 버튼 노출
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  nativeButton={false}
+                  render={<Link href={`/sell?edit=true&id=${product.id}`} />}
+                >
+                  수정하기
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={handleDelete}
+                >
+                  삭제하기
+                </Button>
+              </div>
             ) : (
+              // 💡 남이 등록한 상품일 때: 기존 신청하기 버튼 노출
               <Button size="lg" className="w-full" onClick={handleApplyClick}>
                 <Coins data-icon="inline-start" />
                 상품 신청하기

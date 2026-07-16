@@ -11,6 +11,7 @@ export type User = {
   is_active?: "Y" | "N" | null
   user_lat?: number | null
   user_lng?: number | null
+  firebase_uid?: string | null
 }
 
 export type SignupInput = {
@@ -37,5 +38,6 @@ export function toUser(raw: Record<string, unknown> | null | undefined): User | 
     is_active: (raw.is_active as User["is_active"]) ?? null,
     user_lat: raw.user_lat != null ? Number(raw.user_lat) : null,
     user_lng: raw.user_lng != null ? Number(raw.user_lng) : null,
+    firebase_uid: raw.firebase_uid != null ? String(raw.firebase_uid) : null,
   }
 }

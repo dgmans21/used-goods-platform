@@ -1,9 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db';
 
-const prisma = new PrismaClient();
-
-// 1. 🚀 [기존] 상품 등록 컨트롤러 함수
+// 1. 🚀 상품 등록
 export const createProduct = async (req: Request, res: Response): Promise<void> => {
   const { name, price, description, image_url, seller_id } = req.body;
 
@@ -30,14 +28,33 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-// 2. 🔍 [추가] 전체 상품 목록 조회
+// 2. 🔍 전체 상품 목록 조회 (🔥 seller_id 필터링 로직 반영 완료!)
 export const getProducts = async (req: Request, res: Response): Promise<void> => {
+  const { seller_id } = req.query; // 🚀 프론트엔드가 보낸 쿼리 스트링 감지 (?seller_id=...)
+
   try {
+    // 💡 seller_id가 존재하고 올바른 숫자인 경우에만 필터 조건을 생성합니다.
+    const whereCondition = seller_id && !isNaN(Number(seller_id))
+      ? { seller_id: Number(seller_id) }
+      : {};
+
     const products = await prisma.product.findMany({
+      where: whereCondition, // 👈 필터 조건 대입 (없으면 전체 조회)
+      // 💡 여기서 Prisma Relation을 사용해 user 테이블을 조인합니다!
+      include: {
+        user: {
+          select: {
+            user_id: true,
+            nickname: true,
+            // pw 같은 민감 정보는 제외하고 필요한 정보만 select 해오는 것이 보안상 안전합니다.
+          }
+        }
+      },
       orderBy: {
         id: 'desc', // 최신 등록 순 정렬
       },
     });
+    
     res.status(200).json(products);
   } catch (error) {
     console.error("Error in getProducts:", error);
@@ -45,34 +62,53 @@ export const getProducts = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-// 3. 📄 [추가] 상품 상세정보 단건 조회 (상세 페이지 대응)
+// 3. 📄 상품 상세정보 단건 조회
 export const getProductById = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
 
   try {
-    const product = await prisma.product.findUnique({
+    const productData = await prisma.product.findUnique({
       where: { id: Number(id) },
+      include: {
+        user: {
+          select: {
+            nickname: true, // 판매자 닉네임 가져오기
+          },
+        },
+      },
     });
 
-    if (!product) {
+    if (!productData) {
       res.status(404).json({ error: "존재하지 않는 상품입니다." });
       return;
     }
 
-    res.status(200).json(product);
+    const formattedProduct = {
+      id: productData.id,
+      name: productData.name,
+      price: productData.price,
+      description: productData.description,
+      image_url: productData.image_url,
+      status: productData.status,
+      created_at: productData.created_at,
+      updated_at: productData.updated_at,
+      seller_id: productData.seller_id,
+      sellerNickname: productData.user?.nickname || "탈퇴한 회원",
+    };
+
+    res.status(200).json(formattedProduct);
   } catch (error) {
     console.error("Error in getProductById:", error);
     res.status(500).json({ error: "상품 상세 조회 중 서버 에러가 발생했습니다." });
   }
 };
 
-// 4. ✏️ [추가] 상품 수정
+// 4. ✏️ 상품 수정
 export const updateProduct = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const { name, price, description, image_url } = req.body;
 
   try {
-    // 상품 존재 여부 확인
     const exists = await prisma.product.findUnique({
       where: { id: Number(id) },
     });
@@ -82,7 +118,6 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // 수정 진행
     const updatedProduct = await prisma.product.update({
       where: { id: Number(id) },
       data: {
@@ -100,12 +135,11 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-// 5. 🗑️ [추가] 상품 삭제
+// 5. 🗑️ 상품 삭제
 export const deleteProduct = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
 
   try {
-    // 상품 존재 여부 확인
     const exists = await prisma.product.findUnique({
       where: { id: Number(id) },
     });
@@ -115,7 +149,6 @@ export const deleteProduct = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // 삭제 실행
     await prisma.product.delete({
       where: { id: Number(id) },
     });

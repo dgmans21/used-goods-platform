@@ -5,9 +5,8 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { toast } from "sonner"
-import { signInWithPopup } from "firebase/auth"
 
-import { auth, googleProvider } from "@/firebase"
+import { useAuthStore } from "@/store/authStore"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,6 +41,7 @@ type Errors = Partial<Record<keyof FormState, string>>
 
 export default function SignupPage() {
   const router = useRouter()
+  const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle)
 
   const [form, setForm] = useState<FormState>({
     userId: "",
@@ -152,46 +152,16 @@ export default function SignupPage() {
 
   async function handleGoogle() {
     try {
-      const result = await signInWithPopup(
-        auth,
-        googleProvider
-      )
-
-      const user = result.user
-
-      if (!user.email) {
-        throw new Error(
-          "Google 이메일 정보를 가져올 수 없습니다."
-        )
+      const ok = await loginWithGoogle()
+      if (ok) {
+        toast.success("Google 계정으로 가입되었습니다.")
+        router.push("/")
+      } else {
+        toast.error("Google 로그인에 실패했습니다.")
       }
-
-      await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL}/users/google`,
-        {
-          user_id: user.email,
-          nickname:
-            user.displayName ?? "Google 사용자",
-          address: "",
-          address2: "",
-          firebase_uid: user.uid,
-        }
-      )
-
-      toast.success(
-        "Google 계정으로 가입되었습니다."
-      )
-
-      router.push("/")
-
     } catch (error) {
-      console.error(
-        "Google 로그인 실패:",
-        error
-      )
-
-      toast.error(
-        "Google 로그인에 실패했습니다."
-      )
+      console.error("Google 로그인 실패:", error)
+      toast.error("Google 로그인에 실패했습니다.")
     }
   }
 
