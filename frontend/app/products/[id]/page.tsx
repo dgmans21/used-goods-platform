@@ -230,22 +230,27 @@ async function handleConfirm() {
 
           <div className="mt-8">
             {isOwner ? (
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  nativeButton={false}
-                  render={<Link href={`/sell?edit=true&id=${product.id}`} />}
-                >
-                  수정하기
-                </Button>
-                <Button
-                  variant="destructive"
-                  className="flex-1"
-                  onClick={handleDelete}
-                >
-                  삭제하기
-                </Button>
+              <div className="flex flex-col gap-2">
+                <p className="text-center text-sm font-medium text-muted-foreground">
+                  내가 작성한 글입니다
+                </p>
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    nativeButton={false}
+                    render={<Link href={`/sell?edit=true&id=${product.id}`} />}
+                  >
+                    수정하기
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    onClick={handleDelete}
+                  >
+                    삭제하기
+                  </Button>
+                </div>
               </div>
             ) : (
               <Button size="lg" className="w-full" onClick={handleApplyClick}>

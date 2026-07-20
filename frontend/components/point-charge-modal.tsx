@@ -1,8 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { Coins } from "lucide-react"
+import { Coins, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
+import axios from "axios"
+import * as PortOne from "@portone/browser-sdk/v2"
 
 import {
   Dialog,
@@ -14,7 +16,9 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useAuthStore } from "@/store/authStore" // 🚀 유저 정보 및 포인트 충전 액션 통합 사용
+import { useAuthStore } from "@/store/authStore"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000"
 
 interface PointChargeModalProps {
   isOpen: boolean
@@ -23,50 +27,127 @@ interface PointChargeModalProps {
 
 export function PointChargeModal({ isOpen, onClose }: PointChargeModalProps) {
   const currentUser = useAuthStore((s) => s.currentUser)
-  
-  // 🚀 통합된 authStore에서 포인트 충전 액션을 직접 가져옵니다.
   const chargePoints = useAuthStore((s) => s.chargePoints)
+  const updatePoint = useAuthStore((s) => s.updatePoint)
   
   const [amount, setAmount] = useState<string>("")
+  const [targetNickname, setTargetNickname] = useState<string>("") // 어드민 지급 대상 닉네임
+  const [mode, setMode] = useState<"user" | "admin">("user") // 일반 결제 / 어드민 수동 지급 모드
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // 🚀 버튼 클릭 시 기존 입력 금액에 계속 누적해서 더해주는 함수
+  // 어드민 여부 확인 (이메일/아이디 기준)
+  const isAdmin = currentUser?.user_id?.toLowerCase() === "admin@admin.com"
+
   const handleAccumulateAmount = (val: number) => {
     const currentVal = parseInt(amount, 10)
     const baseAmount = isNaN(currentVal) ? 0 : currentVal
     setAmount((baseAmount + val).toString())
   }
 
-  const handleCharge = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    const chargeAmount = parseInt(amount, 10)
-    if (isNaN(chargeAmount) || chargeAmount <= 0) {
-      alert("올바른 금액을 입력해 주세요.")
+  // 1. 일반 결제 충전 (KG이니시스 결제창 팝업호출)
+
+const handleUserCharge = async () => {
+  const chargeAmount = parseInt(amount, 10)
+  if (isNaN(chargeAmount) || chargeAmount <= 0) {
+    alert("올바른 금액을 입력해 주세요.")
+    return
+  }
+
+  if (!currentUser?.id) {
+    alert("로그인이 필요합니다.")
+    return
+  }
+
+  setIsSubmitting(true)
+  try {
+    const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+
+    // 💡 타입스크립트 에러(빨간줄) 방지를 위해 (currentUser as any) 처리
+    const userObj = currentUser as any
+    const rawPhone = userObj.phone_number || userObj.phoneNumber || userObj.phone || "01000000000"
+    const cleanPhone = String(rawPhone).replace(/[^0-9]/g, "") || "01000000000"
+
+    // 🚀 KG이니시스 필수값 포함
+    const response = await PortOne.requestPayment({
+      storeId: process.env.NEXT_PUBLIC_PORTONE_STORE_ID!,
+      channelKey: process.env.NEXT_PUBLIC_PORTONE_CHANNEL_KEY!,
+      paymentId: paymentId,
+      orderName: `${chargeAmount.toLocaleString()} 포인트 충전`,
+      totalAmount: chargeAmount,
+      currency: "CURRENCY_KRW",
+      payMethod: "CARD",
+      customer: {
+        email: currentUser.user_id || "user@example.com",
+        fullName: currentUser.nickname || "포인트충전고객",
+        phoneNumber: cleanPhone,
+      },
+      windowType: {
+        pc: "IFRAME",
+        mobile: "REDIRECTION",
+      },
+    })
+
+    // 결제창을 그냥 닫거나 결제에 실패한 경우
+    if (response?.code !== undefined) {
+      toast.error(`결제 실패: ${response.message}`)
       return
     }
 
-    if (!currentUser?.id) {
-      alert("로그인이 필요합니다.")
+    // 결제 성공 시 서버 검증 및 포인트 적립
+    await chargePoints(chargeAmount, response!.paymentId)
+  
+    toast.success(`${chargeAmount.toLocaleString()} 포인트가 성공적으로 충전되었습니다!`)
+    setAmount("")
+    onClose()
+  } catch (error: any) {
+    toast.error(error.message || "충전에 실패했습니다. 다시 시도해 주세요.")
+  } finally {
+    setIsSubmitting(false)
+  }
+}
+  // 2. 👑 어드민 수동 포인트 지급
+  const handleAdminGrant = async () => {
+    const grantAmount = parseInt(amount, 10)
+    if (isNaN(grantAmount) || grantAmount <= 0) {
+      alert("올바른 포인트를 입력해 주세요.")
+      return
+    }
+
+    if (!targetNickname.trim()) {
+      alert("지급할 대상의 닉네임을 입력해 주세요.")
       return
     }
 
     setIsSubmitting(true)
     try {
-      // 🚀 단일화된 chargePoints 함수를 실행합니다.
-      await chargePoints(chargeAmount)
-    
-      // 1. 성공 토스트 띄우기 (사용자 클릭을 기다리지 않고 바로 아래 코드가 실행됨)
-      toast.success(`${chargeAmount.toLocaleString()} 포인트가 성공적으로 충전되었습니다!`)
-      
-      // 2. 입력값 초기화 및 모달 닫기 (즉시 실행되어 자연스럽게 닫힘)
+      const response = await axios.post(`${API_BASE}/api/applications/admin-grant`, {
+        adminUserId: currentUser?.id,
+        targetNickname: targetNickname.trim(),
+        amount: grantAmount,
+      })
+
+      if (currentUser?.nickname === targetNickname.trim() && response.data?.newPoint !== undefined) {
+        updatePoint(response.data.newPoint)
+      }
+
+      toast.success(`[어드민] '${targetNickname}'님에게 ${grantAmount.toLocaleString()}P가 지급되었습니다!`)
       setAmount("")
+      setTargetNickname("")
       onClose()
     } catch (error: any) {
-      // 에러 발생 시에도 토스트로 친절하게 전달
-      toast.error(error.message || "충전에 실패했습니다. 다시 시도해 주세요.")
+      const errMsg = error.response?.data?.error || "어드민 포인트 지급 중 오류가 발생했습니다."
+      toast.error(errMsg)
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (mode === "admin") {
+      handleAdminGrant()
+    } else {
+      handleUserCharge()
     }
   }
 
@@ -74,20 +155,53 @@ export function PointChargeModal({ isOpen, onClose }: PointChargeModalProps) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Coins className="size-5 text-primary" />
-            포인트 충전하기
+          <DialogTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Coins className="size-5 text-primary" />
+              {mode === "admin" ? "관리자 전용 포인트 지급" : "포인트 충전하기"}
+            </div>
+
+            {isAdmin && (
+              <Button
+                type="button"
+                variant={mode === "admin" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setMode(mode === "user" ? "admin" : "user")}
+                className="text-xs h-7 gap-1"
+              >
+                <ShieldCheck className="size-3.5 text-yellow-400" />
+                {mode === "admin" ? "일반 결제 모드" : "어드민 지급 모드"}
+              </Button>
+            )}
           </DialogTitle>
           <DialogDescription>
-            충전하실 포인트 금액을 입력해 주세요.
+            {mode === "admin"
+              ? "특정 닉네임 사용자의 포인트를 즉시 지급/수정합니다."
+              : "충전하실 포인트 금액을 입력해 주세요."}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleCharge} className="space-y-4 py-4">
+        <form onSubmit={handleSubmit} className="space-y-4 py-2">
+          {mode === "admin" && (
+            <div className="flex flex-col gap-2 p-3 bg-yellow-50/50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-900 rounded-lg">
+              <label htmlFor="targetNickname" className="text-sm font-medium text-yellow-900 dark:text-yellow-300">
+                지급 대상 닉네임
+              </label>
+              <Input
+                id="targetNickname"
+                type="text"
+                placeholder="예: 홍길동"
+                value={targetNickname}
+                onChange={(e) => setTargetNickname(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <label htmlFor="amount" className="text-sm font-medium">
-                충전 금액
+                {mode === "admin" ? "지급할 포인트" : "충전 금액"}
               </label>
               {amount && (
                 <button
@@ -135,8 +249,16 @@ export function PointChargeModal({ isOpen, onClose }: PointChargeModalProps) {
             <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>
               취소
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "충전 중..." : "충전하기"}
+            <Button 
+              type="submit" 
+              disabled={isSubmitting} 
+              variant={mode === "admin" ? "destructive" : "default"}
+            >
+              {isSubmitting
+                ? "처리 중..."
+                : mode === "admin"
+                ? "무료 포인트 지급하기"
+                : "결제하기"}
             </Button>
           </DialogFooter>
         </form>

@@ -25,79 +25,68 @@ export const getUsers = async (req: Request, res: Response) => {
 
 
 export const createUser = async (req: Request, res: Response) => {
+  const { user_id, pw, nickname, address, address2 } = req.body;
 
-    const { user_id, pw, nickname, address, address2, point } = req.body;
+  try {
+    const hashedPassword = await bcrypt.hash(pw, 10);
 
-    try {
+    let userLat: number | null = null;
+    let userLng: number | null = null;
 
-        const hashedPassword = await bcrypt.hash(pw, 10);
-
-
-        let userLat: number | null = null;
-        let userLng: number | null = null;
-
-
-        // 카카오 주소 API를 이용한 좌표 변환
-        if (address) {
-
-            const kakaoResponse = await axios.get(
-                "https://dapi.kakao.com/v2/local/search/address.json",
-                {
-                    headers: {
-                        Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}`,
-                    },
-                    params: {
-                        query: address,
-                    },
-                }
-            );
-
-
-            const document = kakaoResponse.data.documents?.[0];
-
-
-            if (document) {
-                // x = 경도, y = 위도
-                userLng = Number(document.x);
-                userLat = Number(document.y);
-                }
+    // 카카오 주소 API를 이용한 좌표 변환
+    if (address) {
+      const kakaoResponse = await axios.get(
+        "https://dapi.kakao.com/v2/local/search/address.json",
+        {
+          headers: {
+            Authorization: `KakaoAK ${process.env.KAKAO_REST_API_KEY}`,
+          },
+          params: {
+            query: address,
+          },
         }
+      );
 
+      const document = kakaoResponse.data.documents?.[0];
 
-        const user = await prisma.user.create({
-            data: {
-                user_id,
-                pw: hashedPassword,
-                nickname,
-                address,
-                address2,
-                point: Number(point),
-                user_lat: userLat,
-                user_lng: userLng, // 현재 Prisma 모델명 기준
-                created_at: new Date()
-            },
-        });
-   
-
-        const { pw: _, ...userWithoutPassword } = user;
-
-
-        return res.status(200).json({
-            message: "회원가입완료",
-            data: userWithoutPassword
-        });
-
-
-    } catch (error) {
-
-        console.error("5. 에러 발생:", error);
-
-        return res.status(500).json({
-            message: "Internal server error",
-            error: error instanceof Error ? error.message : error
-        });
+      if (document) {
+        // x = 경도, y = 위도
+        userLng = Number(document.x);
+        userLat = Number(document.y);
+      }
     }
+
+    const user = await prisma.user.create({
+      data: {
+        user_id,
+        pw: hashedPassword,
+        nickname,
+        address,
+        address2,
+        point: 0, // 회원가입 시 기본 포인트
+        user_lat: userLat,
+        user_lng: userLng,
+        created_at: new Date(),
+        is_active: "Y",
+      },
+    });
+
+    const { pw: _, ...userWithoutPassword } = user;
+
+    return res.status(200).json({
+      message: "회원가입완료",
+      data: userWithoutPassword,
+    });
+  } catch (error) {
+    console.error("createUser error:", error);
+
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error instanceof Error ? error.message : error,
+    });
+  }
 };
+
 //id중복체크
 export const checkUserId = async (req: Request, res: Response) => {
     const {user_id} = req.body;

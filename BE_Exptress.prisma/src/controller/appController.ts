@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../db';
+import axios from 'axios';
 
 // 🔍 1. [수정 완료] 내 신청 내역 조회 (application -> order 테이블 및 실제 Prisma 연동 버전)
 export const getApplicationsByBuyerId = async (req: Request, res: Response): Promise<void> => {
@@ -44,67 +45,140 @@ export const getApplicationsByBuyerId = async (req: Request, res: Response): Pro
 };
 
 // 💰 2. [점검 완료] 포인트 충전 처리 API
-export const chargePoints = async (req: Request, res: Response): Promise<void> => {
-  const { userId, amount } = req.body;
+
+// 💰 포인트 충전 처리 API (더미)
+
+
+// 👑 [어드민] 특정 닉네임 유저에게 수동 포인트 지급 API
+export const adminGrantPoints = async (req: Request, res: Response): Promise<void> => {
+  const { adminUserId, targetNickname, amount } = req.body;
+
+  // 1. 필수 값 유효성 검사
+  if (!adminUserId || !targetNickname) {
+    res.status(400).json({ error: "어드민 ID와 대상 닉네임이 필요합니다." });
+    return;
+  }
+
+  const grantAmount = Number(amount);
+  if (isNaN(grantAmount) || grantAmount <= 0) {
+    res.status(400).json({ error: "올바른 포인트 금액을 입력해 주세요." });
+    return;
+  }
 
   try {
-    // 🚀 [임시 코드] 기존에 포인트가 NULL(또는 없는)인 유저들을 전부 찾아 point를 0으로 강제 업데이트합니다.
-    // 이 코드는 한 번 실행된 후 지우셔도 무방합니다.
-    await prisma.user.updateMany({
-      where: {
-        OR: [
-          { point: null as any }, // point가 null인 경우
-          { point: { equals: undefined } }
-        ]
+    // 2. 요청을 보낸 사람이 진짜 Admin 계정인지 DB 검증
+    const adminUser = await prisma.user.findUnique({
+      where: { id: Number(adminUserId) },
+    });
+
+    if (!adminUser || adminUser.user_id?.toLowerCase() !== "admin@admin.com") {
+      res.status(403).json({ error: "관리자 권한이 없습니다." });
+      return;
+    }
+
+    // 3. 닉네임으로 포인트를 받을 대상 유저 찾기
+    const targetUser = await prisma.user.findFirst({
+      where: { nickname: targetNickname.trim() },
+    });
+
+    if (!targetUser) {
+      res.status(404).json({ error: `'${targetNickname}' 닉네임을 가진 유저를 찾을 수 없습니다.` });
+      return;
+    }
+
+    // 4. Prisma의 increment로 포인트 더해주기 (속도 빠르고 안전!)
+    const updatedTargetUser = await prisma.user.update({
+      where: { id: targetUser.id },
+      data: { 
+        point: { increment: grantAmount } 
       },
-      data: {
-        point: 0
-      }
-    });
-    console.log("📢 [성공] 기존 NULL 포인트를 가진 모든 사용자의 포인트를 0으로 초기화 완료했습니다.");
-
-    // -- 이 아래부터는 기존 충전 처리 로직 --
-    if (!userId) {
-      res.status(400).json({ error: "유저 식별키(userId)가 필요합니다." });
-      return;
-    }
-
-    const chargeAmount = Number(amount);
-    if (isNaN(chargeAmount) || chargeAmount <= 0) {
-      res.status(400).json({ error: "올바른 충전 금액을 입력해 주세요." });
-      return;
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: Number(userId) }
-    });
-
-    if (!user) {
-      res.status(404).json({ error: "존재하지 않는 사용자입니다." });
-      return;
-    }
-
-    // NULL 방어 처리
-    const currentPoint = user.point ?? 0; 
-    const nextPoint = currentPoint + chargeAmount;
-
-    const updatedUser = await prisma.user.update({
-      where: { id: Number(userId) },
-      data: { point: nextPoint },
       select: { id: true, nickname: true, point: true }
     });
 
+    // 5. 성공 응답 (newPoint 반환)
     res.status(200).json({
-      message: `${chargeAmount.toLocaleString()} 포인트가 성공적으로 충전되었습니다.`,
-      point: updatedUser.point, 
+      message: `'${updatedTargetUser.nickname}'님에게 ${grantAmount.toLocaleString()}P가 성공적으로 지급되었습니다.`,
+      newPoint: updatedTargetUser.point,
     });
 
   } catch (error: any) {
-    console.error("❌ 포인트 충전 중 DB 오류 발생:", error);
-    res.status(500).json({ error: "서버 오류로 인해 포인트 충전에 실패했습니다." });
+    console.error("❌ 어드민 포인트 지급 중 DB 오류 발생:", error);
+    res.status(500).json({ error: "서버 오류로 인해 포인트 지급에 실패했습니다." });
   }
 };
-export const createApplication = async (req: Request, res: Response) => {
+
+
+// 💰 [포트원 V2] 포인트 결제 검증 및 충전 처리 API
+export const chargePoints = async (req: Request, res: Response): Promise<void> => {
+  // 프론트엔드에서 넘겨주는 파라미터 (paymentId 필수)
+  const { userId, amount, paymentId } = req.body;
+
+  // 1. 필수 입력값 검증
+  if (!userId) {
+    res.status(400).json({ error: "유저 식별키(userId)가 필요합니다." });
+    return;
+  }
+
+  if (!paymentId) {
+    res.status(400).json({ error: "포트원 결제 고유 번호(paymentId)가 필요합니다." });
+    return;
+  }
+
+  const chargeAmount = Number(amount);
+  if (isNaN(chargeAmount) || chargeAmount <= 0) {
+    res.status(400).json({ error: "올바른 충전 금액을 입력해 주세요." });
+    return;
+  }
+
+  try {
+    // 2. 🚀 [핵심 보안] 포트원 V2 서버로 실결제 내역 단건 조회 요청
+    const paymentResponse = await axios.get(
+      `https://api.portone.io/payments/${paymentId}`,
+      {
+        headers: {
+          Authorization: `PortOne ${process.env.PORTONE_API_SECRET}`,
+        },
+      }
+    );
+
+    const paymentData = paymentResponse.data;
+
+    // 3. 결제 상태 및 금액 위변조 검증
+    // - status가 'PAID'(결제 완료)인지 확인
+    // - 실제 결제된 금액(amount.total)과 유저가 충전 요청한 금액(chargeAmount)이 일치하는지 확인
+    if (paymentData.status !== "PAID" || paymentData.amount.total !== chargeAmount) {
+      res.status(400).json({ error: "유효하지 않거나 금액이 일치하지 않는 결제 시도입니다." });
+      return;
+    }
+
+    // 4. ✅ 검증 통과 시 DB 유저 포인트 증가 처리 (increment 활용)
+    const updatedUser = await prisma.user.update({
+      where: { id: Number(userId) },
+      data: {
+        point: { increment: chargeAmount },
+      },
+      select: { id: true, nickname: true, point: true },
+    });
+
+    // 5. 성공 응답
+    res.status(200).json({
+      message: `${chargeAmount.toLocaleString()} 포인트가 성공적으로 충전되었습니다.`,
+      point: updatedUser.point,
+    });
+
+  } catch (error: any) {
+    // 포트원 서버 응답 에러 또는 DB 에러 세부 로깅
+    const errorMessage = error.response?.data?.message || error.message;
+    console.error("❌ PG 결제 검증 및 포인트 충전 에러:", errorMessage);
+
+    res.status(500).json({ 
+      error: "결제 검증 처리 중 서버 오류가 발생했습니다.",
+      details: process.env.NODE_ENV === "development" ? errorMessage : undefined
+    });
+  }
+};
+
+ export const createApplication = async (req: Request, res: Response) => {
   const { product_id, buyer_id } = req.body;
 
   if (!product_id || !buyer_id) {
@@ -216,6 +290,137 @@ export const createApplication = async (req: Request, res: Response) => {
   }
 };
 
+// 1. 내가 등록한 상품들에 들어온 신청(Order) 목록 조회
+
+export const getReceivedApplications = async (req: Request, res: Response) => {
+  const { seller_id } = req.query;
+
+  if (!seller_id || isNaN(Number(seller_id))) {
+    return res.status(200).json({ 
+      success: false, 
+      message: "판매자 정보가 유효하지 않습니다." 
+    });
+  }
+
+  try {
+    const orders = await prisma.order.findMany({
+      where: {
+        product: {
+          seller_id: Number(seller_id),
+        },
+      },
+      include: {
+        product: true,
+        buyer: { // 👈 'user' 대신 'buyer'로 변경!
+          select: {
+            id: true,
+            nickname: true,
+          },
+        },
+      },
+      orderBy: {
+        created_at: "desc",
+      },
+    });
+
+    return res.status(200).json({ success: true, orders });
+  } catch (error) {
+    console.error("내가 받은 신청 목록 조회 에러:", error);
+    return res.status(500).json({ message: "서버 오류가 발생했습니다." });
+  }
+};
+
+
+// 2. 받은 신청 승인 및 거절 (POST /api/applications/handle)
+export const handleApplicationStatus = async (req: Request, res: Response) => {
+  const { order_id, action } = req.body; // action: 'approve' | 'reject'
+
+  if (!order_id || !["approve", "reject"].includes(action)) {
+    return res.status(200).json({ 
+      success: false, 
+      message: "잘못된 요청 파라미터입니다." 
+    });
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: Number(order_id) },
+        include: { product: true },
+      });
+
+      if (!order) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+
+      if (order.status !== "pending") {
+        throw new Error("ALREADY_PROCESSED");
+      }
+
+      if (action === "approve") {
+        // [승인 처리]
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "completed" },
+        });
+
+        await tx.product.update({
+          where: { id: order.product_id },
+          data: { status: "sold" },
+        });
+
+        // 🚀 판매자 포인트 증액 및 갱신된 값 반환
+        const updatedSeller = await tx.user.update({
+          where: { id: order.product.seller_id },
+          data: {
+            point: { increment: Number(order.product.price) },
+          },
+          select: { point: true },
+        });
+
+        return { 
+          message: "구매 신청을 승인하였습니다.",
+          newPoint: updatedSeller.point 
+        };
+      } else {
+        // [거절 처리]
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "rejected" },
+        });
+
+        // 차감되었던 포인트 구매자에게 환불
+        await tx.user.update({
+          where: { id: order.buyer_id },
+          data: {
+            point: { increment: Number(order.product.price) },
+          },
+        });
+
+        return { 
+          message: "구매 신청을 거절하고 포인트를 환불했습니다." 
+        };
+      }
+    });
+
+    return res.status(200).json({ 
+      success: true, 
+      message: result.message,
+      newPoint: result.newPoint // 👈 승인 시 프론트로 갱신 포인트 전달 (거절 시 undefined)
+    });
+  } catch (error: any) {
+    console.error("신청 처리 에러:", error);
+
+    if (error.message === "ORDER_NOT_FOUND") {
+      return res.status(200).json({ success: false, message: "존재하지 않는 신청 내역입니다." });
+    }
+    if (error.message === "ALREADY_PROCESSED") {
+      return res.status(200).json({ success: false, message: "이미 처리 완료된 신청건입니다." });
+    }
+
+    return res.status(500).json({ message: "처리 중 서버 오류가 발생했습니다." });
+  }
+};
 // 🚀 거래 완료 (판매자에게 포인트 지불)
 export const completeApplication = async (req: Request, res: Response) => {
   const { order_id } = req.body;
