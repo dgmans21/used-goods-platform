@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Coins } from "lucide-react"
+import { toast } from "sonner"
 
 import {
   Dialog,
@@ -52,14 +53,18 @@ export function PointChargeModal({ isOpen, onClose }: PointChargeModalProps) {
 
     setIsSubmitting(true)
     try {
-      // 🚀 단일화된 chargePoints 함수를 실행합니다. (유저 ID를 넘길 필요가 없어 무척 직관적입니다)
+      // 🚀 단일화된 chargePoints 함수를 실행합니다.
       await chargePoints(chargeAmount)
-
-      alert(`${chargeAmount.toLocaleString()} 포인트가 성공적으로 충전되었습니다!`)
+    
+      // 1. 성공 토스트 띄우기 (사용자 클릭을 기다리지 않고 바로 아래 코드가 실행됨)
+      toast.success(`${chargeAmount.toLocaleString()} 포인트가 성공적으로 충전되었습니다!`)
+      
+      // 2. 입력값 초기화 및 모달 닫기 (즉시 실행되어 자연스럽게 닫힘)
       setAmount("")
       onClose()
     } catch (error: any) {
-      alert(error.message || "충전에 실패했습니다. 다시 시도해 주세요.")
+      // 에러 발생 시에도 토스트로 친절하게 전달
+      toast.error(error.message || "충전에 실패했습니다. 다시 시도해 주세요.")
     } finally {
       setIsSubmitting(false)
     }

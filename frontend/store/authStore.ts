@@ -45,7 +45,13 @@ export const useAuthStore = create<AuthState>()(
           set({ currentUser: user })
           return true
         } catch (error) {
-          console.error("로그인 실패:", error)
+          // 💡 변경: console.error 대신 가벼운 경고나 로그로 대체하거나 아예 지우기!
+          // 진짜 서버가 터진 건지(500), 비번만 틀린 건지(401) 구별해서 로깅하면 더 좋습니다.
+          if (axios.isAxiosError(error) && error.response?.status === 401) {
+            console.warn("로그인 실패: 인증 정보 불일치 )")
+          } else {
+            console.error("시스템 오류인 경우에만 오류출력:", error)
+          }
           return false
         }
       },

@@ -11,9 +11,9 @@ import axios from "axios"
 import { formatPoints, useStore } from "@/lib/store"
 import { useAuthStore } from "@/store/authStore"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { PointChargeModal } from "@/components/point-charge-modal" // 🚀 충전 모달 import 추가
 import {
   Dialog,
   DialogClose,
@@ -51,7 +51,8 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState(false)
-
+  const [isChargeOpen, setIsChargeOpen] = useState(false) // 🚀 포인트 충전 모달 상태
+  const updatePoint = useAuthStore((s) => s.updatePoint)
   // 💡 3. 데이터 로드 전략: 백엔드 우선 -> 실패 시 Mock 데이터에서 탐색
   useEffect(() => {
     async function fetchProduct() {
@@ -101,24 +102,26 @@ export default function ProductDetailPage() {
   const points = currentUser?.point ?? 0
   const insufficient = points < product.price
   const remaining = points - product.price
-// 🗑️ 상품 삭제 처리 함수
-async function handleDelete() {
-  if (!confirm("정말로 이 상품을 삭제하시겠습니까?")) return
 
-  try {
-    if (product?.seller_id) {
-      // 백엔드 삭제 API 호출
-      await axios.delete(`${API_BASE}/api/products/${product.id}`)
-      toast.success("상품이 정상적으로 삭제되었습니다.")
-      router.push("/")
-    } else {
-      toast.error("로컬 테스트용 데이터는 삭제할 수 없습니다.")
+  // 🗑️ 상품 삭제 처리 함수
+  async function handleDelete() {
+    if (!confirm("정말로 이 상품을 삭제하시겠습니까?")) return
+
+    try {
+      if (product?.seller_id) {
+        // 백엔드 삭제 API 호출
+        await axios.delete(`${API_BASE}/api/products/${product.id}`)
+        toast.success("상품이 정상적으로 삭제되었습니다.")
+        router.push("/")
+      } else {
+        toast.error("로컬 테스트용 데이터는 삭제할 수 없습니다.")
+      }
+    } catch (error) {
+      console.error(error)
+      toast.error("상품 삭제 중 오류가 발생했습니다.")
     }
-  } catch (error) {
-    console.error(error)
-    toast.error("상품 삭제 중 오류가 발생했습니다.")
   }
-}
+
   function handleApplyClick() {
     if (!currentUser) {
       toast.error("로그인이 필요합니다.")
@@ -130,30 +133,44 @@ async function handleDelete() {
   }
 
   // 💡 5. 구매 신청도 동일하게 Mock과 API 동시 지원
-  async function handleConfirm() {
-    try {
-      // 1) 백엔드에 연동된 상품인 경우 백엔드로 API 전송 시도
-      if (product?.seller_id) {
-        // (선택) 백엔드 포인트 차감 및 신청 API 호출
-        // await axios.post(`${API_BASE}/api/products/${product.id}/apply`, { userId: currentUser?.id })
-        
-        // 아직 백엔드 구매 API가 갖춰지지 않았다면 UI 상태 변경만 먼저 작동하게 구성
+  // 컴포넌트 상단 예시: Zustand 스토어에서 유저 정보 업데이트 함수 가져오기
+// const { currentUser, setCurrentUser } = useAuthStore() 
+
+async function handleConfirm() {
+  if (!product || !currentUser) return
+
+  try {
+    // 💡 백엔드 DB 연동 상품인 경우 (seller_id 존재)
+    if (product.seller_id) {
+      const response = await axios.post(`${API_BASE}/api/applications`, {
+        product_id: product.id,
+        buyer_id: currentUser.id, // 현재 로그인한 유저 = 구매자(buyer)
+      })
+
+      if (response.status === 200 || response.status === 201) {
+        // 🚀 1. 백엔드 처리 성공 시, Zustand의 유저 포인트도 차감해서 반영
+        const nextPoint = (currentUser.point ?? 0) - product.price
+        updatePoint(nextPoint)
+      
+        setDone(true)
+        toast.success("신청이 완료되었습니다.")
+      }
+    } else {
+      // 로컬 Mock 상품인 경우 기존 로직 유지
+      const result = applyProduct(product.id)
+      if (result.ok) {
         setDone(true)
         toast.success("신청이 완료되었습니다.")
       } else {
-        // 2) 백엔드가 아닌 기존 Mock 상품인 경우 기존 로컬 store logic 실행
-        const result = applyProduct(product?.id ?? 0)
-        if (result.ok) {
-          setDone(true)
-          toast.success("신청이 완료되었습니다.")
-        } else {
-          toast.error(result.message)
-        }
+        toast.error(result.message)
       }
-    } catch (error) {
-      toast.error("신청 처리 중 오류가 발생했습니다.")
     }
+  } catch (error: any) {
+    console.error("주문/신청 실패:", error)
+    const errorMsg = error.response?.data?.message || "신청 처리 중 오류가 발생했습니다."
+    toast.error(errorMsg)
   }
+}
 
   const sellerName = product.sellerNickname ?? "판매자"
   const registerDate = product.createdAt ? new Date(product.createdAt).toLocaleDateString() : "최근"
@@ -201,18 +218,18 @@ async function handleDelete() {
                 판매자 · {registerDate} 등록
               </p>
             </div>
-          
           </div>
-          <div><Separator className="my-6" />
+
+          <div>
+            <Separator className="my-6" />
             <h2 className="mb-2 text-sm font-semibold">상품 설명</h2>
-          <p className="leading-relaxed whitespace-pre-line text-muted-foreground">
-            {product.description}
-          </p>
+            <p className="leading-relaxed whitespace-pre-line text-muted-foreground">
+              {product.description}
+            </p>
           </div>
 
           <div className="mt-8">
             {isOwner ? (
-              // 💡 내가 등록한 상품일 때: 수정하기 / 삭제하기 버튼 노출
               <div className="flex gap-3">
                 <Button
                   variant="outline"
@@ -231,7 +248,6 @@ async function handleDelete() {
                 </Button>
               </div>
             ) : (
-              // 💡 남이 등록한 상품일 때: 기존 신청하기 버튼 노출
               <Button size="lg" className="w-full" onClick={handleApplyClick}>
                 <Coins data-icon="inline-start" />
                 상품 신청하기
@@ -241,46 +257,80 @@ async function handleDelete() {
         </div>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      {/* 🚀 신청 진행 및 완료 모달 */}
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          setOpen(v)
+          if (!v) setDone(false)
+        }}
+      >
         <DialogContent>
           {done ? (
+            /* 1️⃣ 신청 완료 화면 */
             <>
               <DialogHeader>
                 <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary/10">
                   <CheckCircle2 className="size-6 text-primary" />
                 </div>
-                <DialogTitle className="text-center">신청 완료</DialogTitle>
-                <DialogDescription className="text-center">
-                  {product.name} 신청이 완료되었습니다. 판매자에게 알림이 전달됩니다.
+                <DialogTitle className="text-center text-xl font-bold">
+                  신청이 완료되었습니다!
+                </DialogTitle>
+                <DialogDescription className="text-center text-sm">
+                  <span className="font-semibold text-foreground">
+                    {product.name}
+                  </span>{" "}
+                  신청을 마쳤습니다.
+                  <br />
+                  판매자에게 알림이 전달되었어요.
                 </DialogDescription>
               </DialogHeader>
-              <div className="rounded-lg bg-muted p-4 text-sm">
+
+              <div className="space-y-3 rounded-xl border bg-muted/50 p-4 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">차감 포인트</span>
-                  <span className="font-medium">
+                  <span className="font-semibold text-destructive">
                     -{formatPoints(product.price)}
                   </span>
                 </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-muted-foreground">남은 포인트</span>
-                  <span className="font-semibold text-primary">
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-muted-foreground">
+                    신청 후 잔액
+                  </span>
+                  <span className="text-base font-bold text-primary">
                     {formatPoints(currentUser?.point ?? 0)}
                   </span>
                 </div>
               </div>
-              <DialogFooter>
+
+              <DialogFooter className="gap-2 sm:gap-0">
                 <Button
                   variant="outline"
-                  onClick={() => setOpen(false)}
+                  onClick={() => {
+                    setOpen(false)
+                    setDone(false)
+                  }}
                   nativeButton={false}
                   render={<Link href="/mypage" />}
                 >
                   마이페이지로
                 </Button>
-                <DialogClose render={<Button />}>확인</DialogClose>
+
+                <Button
+                  onClick={() => {
+                    setOpen(false)
+                    setDone(false)
+                  }}
+                >
+                  확인
+                </Button>
               </DialogFooter>
             </>
           ) : (
+            /* 2️⃣ 신청 진행 폼 화면 */
             <>
               <DialogHeader>
                 <DialogTitle>상품 신청하기</DialogTitle>
@@ -337,27 +387,49 @@ async function handleDelete() {
                 </div>
 
                 {insufficient && (
-                  <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <span>
-                      보유 포인트가 부족합니다. 상품을 등록하거나 포인트를 충전해 주세요.
-                    </span>
+                  <div className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                      <span>
+                        보유 포인트가 부족합니다. 포인트를 충전한 후 다시 신청해 주세요.
+                      </span>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-1 w-full border-destructive/30 bg-background text-destructive hover:bg-destructive/10"
+                      onClick={() => {
+                        setOpen(false) // 1. 신청 모달 닫기
+                        setIsChargeOpen(true) // 2. 충전 모달 켜기
+                      }}
+                    >
+                      <Coins className="mr-1.5 size-4" />
+                      포인트 충전하러 가기
+                    </Button>
                   </div>
                 )}
-              </div>
 
-              <DialogFooter>
-                <DialogClose render={<Button variant="outline" />}>
-                  취소
-                </DialogClose>
-                <Button disabled={insufficient} onClick={handleConfirm}>
-                  {formatPoints(product.price)} 신청하기
-                </Button>
-              </DialogFooter>
+                <DialogFooter>
+                  <DialogClose render={<Button variant="outline" />}>
+                    취소
+                  </DialogClose>
+                  <Button disabled={insufficient} onClick={handleConfirm}>
+                    {formatPoints(product.price)} 신청하기
+                  </Button>
+                </DialogFooter>
+              </div>
             </>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* 🚀 포인트 충전 모달 컴포넌트 연결 */}
+      <PointChargeModal
+        isOpen={isChargeOpen}
+        onClose={() => setIsChargeOpen(false)}
+      />
     </main>
   )
 }

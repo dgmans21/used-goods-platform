@@ -104,3 +104,149 @@ export const chargePoints = async (req: Request, res: Response): Promise<void> =
     res.status(500).json({ error: "서버 오류로 인해 포인트 충전에 실패했습니다." });
   }
 };
+export const createApplication = async (req: Request, res: Response) => {
+  const { product_id, buyer_id } = req.body;
+
+  if (!product_id || !buyer_id) {
+    return res.status(400).json({ message: "필수 요청 파라미터가 누락되었습니다." });
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. 상품 존재 및 가격 조회
+      const product = await tx.product.findUnique({
+        where: { id: Number(product_id) },
+      });
+
+      if (!product) {
+        throw new Error("PRODUCT_NOT_FOUND");
+      }
+
+      // 2. 구매자 잔액 조회
+      const buyer = await tx.user.findUnique({
+        where: { id: Number(buyer_id) },
+      });
+
+      if (!buyer) {
+        throw new Error("USER_NOT_FOUND");
+      }
+
+      // 🚨 3. 중복 신청 검사 (이미 'pending' 대기 중인 신청이 있는지 확인)
+      const existingOrder = await tx.order.findFirst({
+        where: {
+          product_id: Number(product_id),
+          buyer_id: Number(buyer_id),
+          status: 'pending',
+        },
+      });
+
+      if (existingOrder) {
+        throw new Error("ALREADY_APPLIED");
+      }
+
+      // 4. 포인트 부족 여부 체크
+      const currentPoint = buyer.point ?? 0;
+      if (currentPoint < product.price) {
+        throw new Error("INSUFFICIENT_POINTS");
+      }
+
+      // 5. 구매자 포인트 차감 (Prisma atomic decrement 사용)
+      await tx.user.update({
+        where: { id: Number(buyer_id) },
+        data: { 
+          point: {
+            decrement: Number(product.price)
+          } 
+        },
+      });
+
+      // 6. order 테이블 생성
+      const newOrder = await tx.order.create({
+        data: {
+          product_id: Number(product_id),
+          buyer_id: Number(buyer_id),
+          status: 'pending',
+        },
+      });
+
+      return newOrder;
+    });
+
+    return res.status(201).json({
+      message: "신청이 성공적으로 완료되었습니다.",
+      order: result,
+    });
+  } catch (error: any) {
+    console.error("상품 신청 에러:", error);
+
+   // 🚀 서버 장애가 아닌 비즈니스 예외들은 200 OK로 반환하여 네트워크 탭/콘솔을 클린하게 유지합니다.
+   if (error.message === "PRODUCT_NOT_FOUND") {
+    return res.status(200).json({
+      success: false,
+      code: "PRODUCT_NOT_FOUND",
+      message: "존재하지 않는 상품입니다.",
+    });
+  }
+
+  if (error.message === "USER_NOT_FOUND") {
+    return res.status(200).json({
+      success: false,
+      code: "USER_NOT_FOUND",
+      message: "사용자 정보를 찾을 수 없습니다.",
+    });
+  }
+
+  if (error.message === "ALREADY_APPLIED") {
+    return res.status(200).json({
+      success: false,
+      code: "ALREADY_APPLIED",
+      message: "이미 신청하여 승인 대기 중인 상품입니다.",
+    });
+  }
+
+  if (error.message === "INSUFFICIENT_POINTS") {
+    return res.status(200).json({
+      success: false,
+      code: "INSUFFICIENT_POINTS",
+      message: "보유 포인트가 부족합니다.",
+    });
+  }
+
+    return res.status(500).json({ message: "신청 처리 중 서버 오류가 발생했습니다." });
+  }
+};
+
+// 🚀 거래 완료 (판매자에게 포인트 지불)
+export const completeApplication = async (req: Request, res: Response) => {
+  const { order_id } = req.body;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      // 1. 주문 정보 및 상품/판매자 조회
+      const order = await tx.order.findUnique({
+        where: { id: Number(order_id) },
+        include: { product: true }
+      });
+
+      if (!order || order.status !== 'pending') {
+        throw new Error("INVALID_ORDER");
+      }
+
+      // 2. 주문 상태를 'completed'로 변경
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: 'completed' }
+      });
+
+      // 3. 판매자(seller)에게 포인트 지급
+      await tx.user.update({
+        where: { id: order.product.seller_id },
+        data: { point: { increment: order.product.price } }
+      });
+    });
+
+    return res.status(200).json({ message: "거래가 완료되어 판매자에게 포인트가 지불되었습니다." });
+  } catch (error: any) {
+    return res.status(400).json({ message: "거래 완료 처리 실패" });
+  }
+};

@@ -122,14 +122,20 @@ export default function HomePage() {
   }, [mockProducts, dbProducts])
 
   // 3. 상품명/설명 또는 조인된 실제 판매자 닉네임으로 검색 필터링
+  // 3. 상품명/설명 또는 조인된 실제 판매자 닉네임으로 검색 필터링
   const filteredProducts = useMemo<Product[]>(() => {
     const q = query.trim().toLowerCase()
     if (!q) return mergedProducts
 
-    return mergedProducts.filter((p) => {
+    return mergedProducts.filter((p: any) => {
       const productName = p.name.toLowerCase()
       const productDesc = p.description?.toLowerCase() ?? ""
-      const sellerNickname = (p.sellerNickname ?? "이웃주민").toLowerCase()
+      // 🚀 검색 시에도 product.user?.nickname 을 함께 참조
+      const sellerNickname = (
+        p.user?.nickname ?? 
+        p.sellerNickname ?? 
+        "이웃주민"
+      ).toLowerCase()
 
       if (searchType === "title") {
         return productName.includes(q) || productDesc.includes(q)
@@ -271,23 +277,29 @@ export default function HomePage() {
         <>
           {/* 상품들을 예쁘게 바둑판 배열로 정렬해주는 부모 div 시작 */}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {paginatedProducts.map((product: any) => {
-              // 1. 컴포넌트에 넘겨줄 규격화된 상품 객체 생성
+          {paginatedProducts.map((product: any) => {
+              // 🚀 Prisma 조인 데이터(product.user.nickname)를 1순위로 추출하도록 수정
+              const sellerNickname =
+                product.user?.nickname ?? // 👈 백엔드 Prisma에서 넘어오는 구조
+                product.seller_nickname ??
+                product.sellerNickname ??
+                "이웃주민"
+
+              // 컴포넌트에 넘겨줄 규격화된 상품 객체 생성
               const formattedProduct = {
                 id: product.id,
                 name: product.name,
                 price: product.price,
                 description: product.description ?? "",
                 image: product.image_url ?? product.image ?? "/placeholder.svg",
-                sellerId: product.seller_id ?? product.sellerId ?? 0,
-                sellerNickname: product.sellerNickname ?? "이웃주민",
+                sellerId: product.seller_id ?? product.user?.user_id ?? product.sellerId ?? 0,
+                sellerNickname: sellerNickname, // 👈 안전하게 추출된 닉네임 적용
                 createdAt: formatProductTime(product.created_at ?? product.createdAt),
                 status: product.status ?? "sale"
               }
 
               return (
                 <ProductCard
-                  // 🚀 중복 Key 문제를 해결하기 위해 고유한 uniqueKey를 적용합니다.
                   key={product.uniqueKey ?? `product-${product.id}`} 
                   product={formattedProduct as any} 
                 />
