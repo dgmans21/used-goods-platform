@@ -252,12 +252,21 @@ async function handleConfirm() {
                   </Button>
                 </div>
               </div>
-            ) : (
-              <Button size="lg" className="w-full" onClick={handleApplyClick}>
-                <Coins data-icon="inline-start" />
-                상품 신청하기
-              </Button>
-            )}
+           ) : (
+            <Button 
+              size="lg" 
+              className="w-full" 
+              onClick={handleApplyClick}
+              disabled={product.status === "sold_out"}
+            >
+              <Coins data-icon="inline-start" />
+              {product.status === "sold_out" 
+                ? "판매 완료된 상품" 
+                : product.status === "reserved" 
+                ? "거래 협상 중 (신청하기)" 
+                : "상품 신청하기"}
+            </Button>
+          )}
           </div>
         </div>
       </div>

@@ -178,11 +178,11 @@ export const chargePoints = async (req: Request, res: Response): Promise<void> =
   }
 };
 
- export const createApplication = async (req: Request, res: Response) => {
+export const createApplication = async (req: Request, res: Response) => {
   const { product_id, buyer_id } = req.body;
 
   if (!product_id || !buyer_id) {
-    return res.status(400).json({ message: "필수 요청 파라미터가 누락되었습니다." });
+    return res.status(400).json({ success: false, message: "필수 요청 파라미터가 누락되었습니다." });
   }
 
   try {
@@ -196,6 +196,11 @@ export const chargePoints = async (req: Request, res: Response): Promise<void> =
         throw new Error("PRODUCT_NOT_FOUND");
       }
 
+      // 🚨 1-1. [추가] 상품이 'sale' 상태가 아닌 경우 (이미 예약중이거나 판매완료된 경우)
+      if (product.status !== "sale") {
+        throw new Error("PRODUCT_NOT_FOR_SALE");
+      }
+
       // 2. 구매자 잔액 조회
       const buyer = await tx.user.findUnique({
         where: { id: Number(buyer_id) },
@@ -205,12 +210,12 @@ export const chargePoints = async (req: Request, res: Response): Promise<void> =
         throw new Error("USER_NOT_FOUND");
       }
 
-      // 🚨 3. 중복 신청 검사 (이미 'pending' 대기 중인 신청이 있는지 확인)
+      // 3. 중복 신청 검사 (이미 'pending' 대기 중인 신청이 있는지 확인)
       const existingOrder = await tx.order.findFirst({
         where: {
           product_id: Number(product_id),
           buyer_id: Number(buyer_id),
-          status: 'pending',
+          status: "pending",
         },
       });
 
@@ -239,54 +244,69 @@ export const chargePoints = async (req: Request, res: Response): Promise<void> =
         data: {
           product_id: Number(product_id),
           buyer_id: Number(buyer_id),
-          status: 'pending',
+          status: "pending",
         },
+      });
+
+      // 🚀 6-1. [핵심 추가] 상품 상태를 'reserved' (거래 협상중)로 변경!
+      await tx.product.update({
+        where: { id: Number(product_id) },
+        data: { status: "reserved" },
       });
 
       return newOrder;
     });
 
     return res.status(201).json({
+      success: true,
       message: "신청이 성공적으로 완료되었습니다.",
       order: result,
     });
   } catch (error: any) {
     console.error("상품 신청 에러:", error);
 
-   // 🚀 서버 장애가 아닌 비즈니스 예외들은 200 OK로 반환하여 네트워크 탭/콘솔을 클린하게 유지합니다.
-   if (error.message === "PRODUCT_NOT_FOUND") {
-    return res.status(200).json({
-      success: false,
-      code: "PRODUCT_NOT_FOUND",
-      message: "존재하지 않는 상품입니다.",
-    });
-  }
+    // 🚀 비즈니스 예외 처리
+    if (error.message === "PRODUCT_NOT_FOUND") {
+      return res.status(200).json({
+        success: false,
+        code: "PRODUCT_NOT_FOUND",
+        message: "존재하지 않는 상품입니다.",
+      });
+    }
 
-  if (error.message === "USER_NOT_FOUND") {
-    return res.status(200).json({
-      success: false,
-      code: "USER_NOT_FOUND",
-      message: "사용자 정보를 찾을 수 없습니다.",
-    });
-  }
+    if (error.message === "PRODUCT_NOT_FOR_SALE") {
+      return res.status(200).json({
+        success: false,
+        code: "PRODUCT_NOT_FOR_SALE",
+        message: "현재 구매 신청을 할 수 없는 상품 상태입니다.",
+      });
+    }
 
-  if (error.message === "ALREADY_APPLIED") {
-    return res.status(200).json({
-      success: false,
-      code: "ALREADY_APPLIED",
-      message: "이미 신청하여 승인 대기 중인 상품입니다.",
-    });
-  }
+    if (error.message === "USER_NOT_FOUND") {
+      return res.status(200).json({
+        success: false,
+        code: "USER_NOT_FOUND",
+        message: "사용자 정보를 찾을 수 없습니다.",
+      });
+    }
 
-  if (error.message === "INSUFFICIENT_POINTS") {
-    return res.status(200).json({
-      success: false,
-      code: "INSUFFICIENT_POINTS",
-      message: "보유 포인트가 부족합니다.",
-    });
-  }
+    if (error.message === "ALREADY_APPLIED") {
+      return res.status(200).json({
+        success: false,
+        code: "ALREADY_APPLIED",
+        message: "이미 신청하여 승인 대기 중인 상품입니다.",
+      });
+    }
 
-    return res.status(500).json({ message: "신청 처리 중 서버 오류가 발생했습니다." });
+    if (error.message === "INSUFFICIENT_POINTS") {
+      return res.status(200).json({
+        success: false,
+        code: "INSUFFICIENT_POINTS",
+        message: "보유 포인트가 부족합니다.",
+      });
+    }
+
+    return res.status(500).json({ success: false, message: "신청 처리 중 서버 오류가 발생했습니다." });
   }
 };
 
@@ -331,6 +351,8 @@ export const getReceivedApplications = async (req: Request, res: Response) => {
 };
 
 
+
+
 // 2. 받은 신청 승인 및 거절 (POST /api/applications/handle)
 export const handleApplicationStatus = async (req: Request, res: Response) => {
   const { order_id, action } = req.body; // action: 'approve' | 'reject'
@@ -344,6 +366,7 @@ export const handleApplicationStatus = async (req: Request, res: Response) => {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      // 1. 주문 조회
       const order = await tx.order.findUnique({
         where: { id: Number(order_id) },
         include: { product: true },
@@ -353,23 +376,25 @@ export const handleApplicationStatus = async (req: Request, res: Response) => {
         throw new Error("ORDER_NOT_FOUND");
       }
 
+      // 2. 이미 처리된 주문인지 검증
       if (order.status !== "pending") {
         throw new Error("ALREADY_PROCESSED");
       }
 
       if (action === "approve") {
-        // [승인 처리]
+        // [1] 선택한 주문 승인 처리
         await tx.order.update({
           where: { id: order.id },
           data: { status: "completed" },
         });
 
+        // [2] 해당 상품 품절 처리 (sold_out Enum 사용)
         await tx.product.update({
           where: { id: order.product_id },
-          data: { status: "sold" },
+          data: { status: "sold_out" },
         });
 
-        // 🚀 판매자 포인트 증액 및 갱신된 값 반환
+        // [3] 판매자 포인트 증액
         const updatedSeller = await tx.user.update({
           where: { id: order.product.seller_id },
           data: {
@@ -378,12 +403,44 @@ export const handleApplicationStatus = async (req: Request, res: Response) => {
           select: { point: true },
         });
 
+        // 🚀 [4] 핵심: 해당 상품의 '다른 대기 중인 신청들' 자동 거절 및 포인트 환불
+        const otherPendingOrders = await tx.order.findMany({
+          where: {
+            product_id: order.product_id,
+            status: "pending",
+            id: { not: order.id }, // 현재 승인하는 주문 제외
+          },
+        });
+
+        if (otherPendingOrders.length > 0) {
+          // 다른 대기 주문들을 일괄 'rejected' 상태로 변경
+          await tx.order.updateMany({
+            where: {
+              product_id: order.product_id,
+              status: "pending",
+              id: { not: order.id },
+            },
+            data: { status: "rejected" },
+          });
+
+          // 다른 신청자들에게 각각 포인트 환불
+          for (const otherOrder of otherPendingOrders) {
+            await tx.user.update({
+              where: { id: otherOrder.buyer_id },
+              data: {
+                point: { increment: Number(order.product.price) },
+              },
+            });
+          }
+        }
+
         return { 
           message: "구매 신청을 승인하였습니다.",
           newPoint: updatedSeller.point 
         };
+
       } else {
-        // [거절 처리]
+        // [거절 처리] - 단건 거절
         await tx.order.update({
           where: { id: order.id },
           data: { status: "rejected" },
@@ -406,8 +463,9 @@ export const handleApplicationStatus = async (req: Request, res: Response) => {
     return res.status(200).json({ 
       success: true, 
       message: result.message,
-      newPoint: result.newPoint // 👈 승인 시 프론트로 갱신 포인트 전달 (거절 시 undefined)
+      newPoint: result.newPoint // 승인 시 프론트로 갱신 포인트 전달
     });
+
   } catch (error: any) {
     console.error("신청 처리 에러:", error);
 
@@ -418,7 +476,7 @@ export const handleApplicationStatus = async (req: Request, res: Response) => {
       return res.status(200).json({ success: false, message: "이미 처리 완료된 신청건입니다." });
     }
 
-    return res.status(500).json({ message: "처리 중 서버 오류가 발생했습니다." });
+    return res.status(500).json({ success: false, message: "처리 중 서버 오류가 발생했습니다." });
   }
 };
 // 🚀 거래 완료 (판매자에게 포인트 지불)

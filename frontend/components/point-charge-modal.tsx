@@ -24,7 +24,28 @@ interface PointChargeModalProps {
   isOpen: boolean
   onClose: () => void
 }
+// 숫자를 '1만 5,000' 형태로 변환해 주는 함수
+const formatKoreanMoney = (value: number | string): string => {
+  const num = typeof value === "string" ? parseInt(value.replace(/[^0-9]/g, ""), 10) : value;
+  if (isNaN(num) || num === 0) return "";
 
+  const unitWords = ["", "만", "억", "조"];
+  const splitUnit = 10000;
+  let result = [];
+  let temp = num;
+  let unitIndex = 0;
+
+  while (temp > 0) {
+    const mod = temp % splitUnit;
+    if (mod > 0) {
+      result.unshift(`${mod.toLocaleString()}${unitWords[unitIndex]}`);
+    }
+    temp = Math.floor(temp / splitUnit);
+    unitIndex++;
+  }
+
+  return result.join(" ");
+};
 export function PointChargeModal({ isOpen, onClose }: PointChargeModalProps) {
   const currentUser = useAuthStore((s) => s.currentUser)
   const chargePoints = useAuthStore((s) => s.chargePoints)
@@ -197,7 +218,6 @@ const handleUserCharge = async () => {
               />
             </div>
           )}
-
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <label htmlFor="amount" className="text-sm font-medium">
@@ -213,15 +233,23 @@ const handleUserCharge = async () => {
                 </button>
               )}
             </div>
+            
             <div className="relative">
               <Input
                 id="amount"
-                type="number"
-                placeholder="예: 10000"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                min="1000"
-                step="1000"
+                type="text"
+                inputMode="numeric"
+                placeholder="예: 10,000"
+                value={
+                  amount
+                    ? Number(amount.toString().replace(/[^0-9]/g, "")).toLocaleString()
+                    : ""
+                }
+                onChange={(e) => {
+                  // 숫자 이외의 문자 제거 후 저장
+                  const rawValue = e.target.value.replace(/[^0-9]/g, "");
+                  setAmount(rawValue);
+                }}
                 required
                 className="pr-10"
               />
@@ -229,7 +257,15 @@ const handleUserCharge = async () => {
                 P
               </span>
             </div>
+
+            {/* 💡 입력한 금액을 한글로 작게 보여주는 영역 추가 */}
+            {amount && Number(amount) > 0 && (
+              <p className="text-xs text-muted-foreground text-right font-medium animate-in fade-in-50">
+                {formatKoreanMoney(amount)} P ({Number(amount).toLocaleString()} P)
+              </p>
+            )}
           </div>
+
 
           <div className="grid grid-cols-4 gap-2">
             {[5000, 10000, 30000, 50000].map((val) => (
