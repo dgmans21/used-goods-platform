@@ -7,7 +7,7 @@ import { useEffect, useState } from "react"
 import { AlertTriangle, ArrowLeft, CheckCircle2, Coins, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import axios from "axios"
-
+import { Product } from "@/types/product"
 import { formatPoints, useStore } from "@/lib/store"
 import { useAuthStore } from "@/store/authStore"
 import { Button } from "@/components/ui/button"
@@ -24,19 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-// 💡 1. 백엔드와 Mock 데이터를 모두 수용할 수 있는 타입 정의
-type Product = {
-  id: number
-  name: string
-  price: number
-  description: string
-  image_url?: string // 백엔드 필드명
-  image?: string     // Mock 필드명
-  seller_id?: number // 백엔드 필드명
-  sellerId?: number  // Mock 필드명
-  sellerNickname: string
-  createdAt?: string
-}
+
 
 const API_BASE = "http://localhost:5000"
 
@@ -252,21 +240,21 @@ async function handleConfirm() {
                   </Button>
                 </div>
               </div>
-           ) : (
-            <Button 
-              size="lg" 
-              className="w-full" 
-              onClick={handleApplyClick}
-              disabled={product.status === "sold_out"}
-            >
-              <Coins data-icon="inline-start" />
-              {product.status === "sold_out" 
-                ? "판매 완료된 상품" 
-                : product.status === "reserved" 
-                ? "거래 협상 중 (신청하기)" 
-                : "상품 신청하기"}
-            </Button>
-          )}
+       ) : (
+        <Button 
+          size="lg" 
+          className="w-full" 
+          onClick={handleApplyClick}
+          disabled={product.status === "sold_out"}
+        >
+          <Coins data-icon="inline-start" />
+          {product.status === "sold_out" 
+            ? "판매 완료된 상품" 
+            : product.status === "reserved" 
+            ? "거래 협상 중 (신청하기)" 
+            : "상품 신청하기"}
+        </Button>
+      )}
           </div>
         </div>
       </div>

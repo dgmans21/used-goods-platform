@@ -3,7 +3,19 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import axios from "axios"
-import { Coins, MapPin, Package, Receipt, Inbox, Check, X, Loader2 } from "lucide-react"
+import {
+  Coins,
+  MapPin,
+  Package,
+  Receipt,
+  Inbox,
+  Check,
+  X,
+  Loader2,
+  EyeOff,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react"
 import { toast } from "sonner"
 import { formatPoints } from "@/lib/store"
 import { useAuthStore } from "@/store/authStore"
@@ -18,20 +30,87 @@ import { PointChargeModal } from "@/components/point-charge-modal"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000"
 
+// 📄 공통 숫자 페이지네이션 컴포넌트
+function NumberPagination({
+  currentPage,
+  totalPages,
+  onPageChange,
+}: {
+  currentPage: number
+  totalPages: number
+  onPageChange: (page: number) => void
+}) {
+  if (totalPages <= 1) return null
+
+  // 페이지 번호 배열 생성 (1~10 단위 범위)
+  const pages = Array.from({ length: totalPages }, (_, i) => i + 1)
+
+  return (
+    <div className="flex items-center justify-center gap-1 py-3 border-t bg-muted/10">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8"
+        disabled={currentPage === 1}
+        onClick={() => onPageChange(currentPage - 1)}
+      >
+        <ChevronLeft className="size-4" />
+      </Button>
+
+      {pages.map((page) => (
+        <Button
+          key={page}
+          variant={page === currentPage ? "default" : "ghost"}
+          size="sm"
+          className="size-8 text-xs font-medium"
+          onClick={() => onPageChange(page)}
+        >
+          {page}
+        </Button>
+      ))}
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8"
+        disabled={currentPage === totalPages}
+        onClick={() => onPageChange(currentPage + 1)}
+      >
+        <ChevronRight className="size-4" />
+      </Button>
+    </div>
+  )
+}
+
 export default function MyPage() {
   const currentUser = useAuthStore((s) => s.currentUser)
   const updatePoint = useAuthStore((s) => s.updatePoint)
 
   const [myProducts, setMyProducts] = useState<Product[]>([])
   const [applications, setApplications] = useState<any[]>([]) // 내가 보낸 신청
-  const [receivedOrders, setReceivedOrders] = useState<any[]>([]) // 🚀 내가 받은 신청
+  const [receivedOrders, setReceivedOrders] = useState<any[]>([]) // 내가 받은 신청
   const [isLoading, setIsLoading] = useState(true)
   const [isChargeModalOpen, setIsChargeModalOpen] = useState(false)
-  const [processingId, setProcessingId] = useState<number | null>(null) // 승인/거절 로딩 State
+  const [processingId, setProcessingId] = useState<number | null>(null)
+
+  // 🙈 1. 받은 신청: 숨김 ID 목록 & 페이지 번호 (페이지당 5개)
+  const [hiddenReceivedIds, setHiddenReceivedIds] = useState<number[]>([])
+  const [pageReceived, setPageReceived] = useState(1)
+  const RECEIVED_PER_PAGE = 5
+
+  // 🙈 2. 등록한 상품: 숨김 ID 목록 & 페이지 번호 (페이지당 6개)
+  const [hiddenProductIds, setHiddenProductIds] = useState<number[]>([])
+  const [pageProducts, setPageProducts] = useState(1)
+  const PRODUCTS_PER_PAGE = 6
+
+  // 🙈 3. 보낸 신청: 숨김 ID 목록 & 페이지 번호 (페이지당 5개)
+  const [hiddenAppIds, setHiddenAppIds] = useState<number[]>([])
+  const [pageApps, setPageApps] = useState(1)
+  const APPS_PER_PAGE = 5
 
   const point = currentUser?.point ?? 0
 
-  // 🔄 1. 받은 신청 목록 불러오기
+  // 🔄 데이터 불러오기
   const fetchReceivedApplications = async () => {
     if (!currentUser?.id) return
     try {
@@ -39,33 +118,36 @@ export default function MyPage() {
         `${API_BASE}/api/applications/received?seller_id=${currentUser.id}`
       )
       if (data.success) {
-        setReceivedOrders(data.orders ?? [])
+        const rawOrders = data.orders ?? []
+        const sortedOrders = [...rawOrders].sort((a, b) => {
+          const dateA = new Date(a.created_at || a.createdAt || 0).getTime()
+          const dateB = new Date(b.created_at || b.createdAt || 0).getTime()
+          if (dateA !== dateB) return dateB - dateA
+          return (b.id ?? 0) - (a.id ?? 0)
+        })
+        setReceivedOrders(sortedOrders)
       }
     } catch (error) {
       console.error("받은 신청 목록 로드 실패:", error)
     }
   }
 
-  // 🔄 2. 백엔드 통합 데이터 패칭
   useEffect(() => {
     if (!currentUser?.id) return
 
     async function fetchMyPageData() {
       setIsLoading(true)
       try {
-        const [productsRes, appsRes, receivedRes] = await Promise.all([
+        const [productsRes, appsRes] = await Promise.all([
           axios.get(`${API_BASE}/api/products?seller_id=${currentUser?.id}`),
           axios.get(`${API_BASE}/api/applications?buyer_id=${currentUser?.id}`),
-          axios.get(`${API_BASE}/api/applications/received?seller_id=${currentUser?.id}`),
         ])
 
         setMyProducts(productsRes.data || [])
         setApplications(appsRes.data || [])
-        if (receivedRes.data?.success) {
-          setReceivedOrders(receivedRes.data.orders || [])
-        }
+        await fetchReceivedApplications()
       } catch (error) {
-        console.error("마이페이지 데이터를 가져오는 중 실패:", error)
+        console.error("마이페이지 데이터 패칭 실패:", error)
       } finally {
         setIsLoading(false)
       }
@@ -74,8 +156,11 @@ export default function MyPage() {
     fetchMyPageData()
   }, [currentUser?.id])
 
-  // 🚀 3. 받은 신청 승인 / 거절 처리 핸들러
-  const handleReceivedStatusChange = async (orderId: number, action: "approve" | "reject") => {
+  // 승인/거절 처리
+  const handleReceivedStatusChange = async (
+    orderId: number,
+    action: "approve" | "reject"
+  ) => {
     try {
       setProcessingId(orderId)
       const { data } = await axios.post(`${API_BASE}/api/applications/handle`, {
@@ -85,14 +170,10 @@ export default function MyPage() {
 
       if (data.success) {
         toast.success(data.message)
-        
-        // 승인 시 백엔드에서 반환된 갱신 포인트가 있는 경우 즉시 반영
         if (action === "approve" && data.newPoint !== undefined) {
           updatePoint(data.newPoint)
         }
-
-        // 목록 리프레시
-        fetchReceivedApplications()
+        await fetchReceivedApplications()
       } else {
         toast.error(data.message || "처리에 실패했습니다.")
       }
@@ -103,14 +184,45 @@ export default function MyPage() {
     }
   }
 
-  // 비로그인 처리
+  // -------------------------------------------------------------
+  // 💡 필터링 및 페이징 계산 영역
+  // -------------------------------------------------------------
+
+  // 1. 내가 받은 신청 (숨김 제외 -> 페이징)
+  const visibleReceived = receivedOrders.filter(
+    (item) => !hiddenReceivedIds.includes(item.id)
+  )
+  const totalReceivedPages = Math.ceil(visibleReceived.length / RECEIVED_PER_PAGE) || 1
+  const paginatedReceived = visibleReceived.slice(
+    (pageReceived - 1) * RECEIVED_PER_PAGE,
+    pageReceived * RECEIVED_PER_PAGE
+  )
+
+  // 2. 내가 등록한 상품 (숨김 제외 -> 페이징)
+  const visibleProducts = myProducts.filter(
+    (item) => !hiddenProductIds.includes(item.id)
+  )
+  const totalProductPages = Math.ceil(visibleProducts.length / PRODUCTS_PER_PAGE) || 1
+  const paginatedProducts = visibleProducts.slice(
+    (pageProducts - 1) * PRODUCTS_PER_PAGE,
+    pageProducts * PRODUCTS_PER_PAGE
+  )
+
+  // 3. 내가 신청한 내역 (숨김 제외 -> 페이징)
+  const visibleApps = applications.filter(
+    (item) => !hiddenAppIds.includes(item.id)
+  )
+  const totalAppPages = Math.ceil(visibleApps.length / APPS_PER_PAGE) || 1
+  const paginatedApps = visibleApps.slice(
+    (pageApps - 1) * APPS_PER_PAGE,
+    pageApps * APPS_PER_PAGE
+  )
+
+  // 비로그인 / 로딩
   if (!currentUser) {
     return (
       <main className="mx-auto flex w-full max-w-md flex-col items-center gap-4 px-4 py-20 text-center">
         <h1 className="text-xl font-bold">로그인이 필요합니다</h1>
-        <p className="text-sm text-muted-foreground">
-          마이페이지는 로그인 후 이용할 수 있습니다.
-        </p>
         <Button nativeButton={false} render={<Link href="/login" />}>
           로그인하러 가기
         </Button>
@@ -118,12 +230,11 @@ export default function MyPage() {
     )
   }
 
-  // 로딩 상태 뷰
   if (isLoading) {
     return (
       <main className="mx-auto flex w-full max-w-5xl flex-col items-center justify-center gap-4 px-4 py-32 text-center">
         <span className="animate-spin size-8 border-4 border-primary border-t-transparent rounded-full" />
-        <p className="text-sm text-muted-foreground">마이페이지 정보를 불러오는 중입니다...</p>
+        <p className="text-sm text-muted-foreground">정보를 불러오는 중입니다...</p>
       </main>
     )
   }
@@ -132,7 +243,7 @@ export default function MyPage() {
     <main className="mx-auto w-full max-w-5xl px-4 py-8">
       <h1 className="mb-6 text-2xl font-bold">마이페이지</h1>
 
-      {/* 유저 프로필 및 포인트 영역 */}
+      {/* 프로필 및 포인트 카드 */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="md:col-span-2">
           <CardContent className="flex items-center gap-4 py-6">
@@ -152,40 +263,54 @@ export default function MyPage() {
           </CardContent>
         </Card>
 
-        {/* 포인트 카드 */}
         <Card
           className="bg-primary text-primary-foreground cursor-pointer transition-colors hover:bg-primary/90"
           onClick={() => setIsChargeModalOpen(true)}
         >
           <CardContent className="flex h-full flex-col justify-center gap-1 py-6">
             <span className="flex items-center gap-1.5 text-sm text-primary-foreground/85">
-              <Coins className="size-4" />
-              보유 포인트 (클릭하여 충전)
+              <Coins className="size-4" /> 보유 포인트 (충전하기)
             </span>
             <p className="text-3xl font-bold">{formatPoints(point)}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* 📥 1. 내가 받은 신청 섹션 (신규 추가!) */}
+      {/* 📥 1. 내가 받은 구매 신청 섹션 */}
       <section className="mt-10">
-        <div className="mb-4 flex items-center gap-2">
-          <Inbox className="size-5 text-primary" />
-          <h2 className="text-lg font-bold">내가 받은 구매 신청</h2>
-          <Badge variant="secondary">
-            {receivedOrders.filter((o) => o.status === "pending").length}건 대기 중
-          </Badge>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Inbox className="size-5 text-primary" />
+            <h2 className="text-lg font-bold">내가 받은 구매 신청</h2>
+            <Badge variant="secondary">
+              {visibleReceived.filter((o) => o.status === "pending").length}건 대기 중
+            </Badge>
+          </div>
+
+          {hiddenReceivedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setHiddenReceivedIds([])}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              숨김 초기화 ({hiddenReceivedIds.length})
+            </button>
+          )}
         </div>
+
         <Card>
           <CardContent className="p-0">
-            {receivedOrders.length > 0 ? (
+            {paginatedReceived.length > 0 ? (
               <ul className="divide-y">
-                {receivedOrders.map((order) => {
+                {paginatedReceived.map((order) => {
                   const isPending = order.status === "pending"
                   const isProcessing = processingId === order.id
 
                   return (
-                    <li key={order.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 gap-4">
+                    <li
+                      key={order.id}
+                      className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 gap-4 transition-colors hover:bg-muted/30"
+                    >
                       <div className="flex items-center gap-3">
                         <img
                           src={order.product?.image_url || "/placeholder.svg"}
@@ -195,7 +320,7 @@ export default function MyPage() {
                         <div>
                           <p className="text-sm font-semibold">{order.product?.name}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                          신청자: <span className="font-medium text-foreground">{order.buyer?.nickname || "이웃"}</span>
+                            신청자: <span className="font-medium text-foreground">{order.buyer?.nickname || "이웃"}</span>
                           </p>
                         </div>
                       </div>
@@ -227,9 +352,20 @@ export default function MyPage() {
                             </Button>
                           </>
                         ) : (
-                          <Badge variant={order.status === "completed" ? "default" : "outline"}>
-                            {order.status === "completed" ? "거래 승인됨" : "거절됨"}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={order.status === "completed" ? "default" : "outline"}>
+                              {order.status === "completed" ? "거래 승인됨" : "거절됨"}
+                            </Badge>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 text-muted-foreground hover:text-foreground"
+                              title="숨기기"
+                              onClick={() => setHiddenReceivedIds((prev) => [...prev, order.id])}
+                            >
+                              <EyeOff className="size-3.5" />
+                            </Button>
+                          </div>
                         )}
                       </div>
                     </li>
@@ -238,45 +374,84 @@ export default function MyPage() {
               </ul>
             ) : (
               <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-                아직 들어온 구매 신청이 없어요.
+                내역이 없거나 숨김 처리되었습니다.
               </p>
             )}
+
+            <NumberPagination
+              currentPage={pageReceived}
+              totalPages={totalReceivedPages}
+              onPageChange={setPageReceived}
+            />
           </CardContent>
         </Card>
       </section>
 
       {/* 📦 2. 내가 등록한 상품 섹션 */}
       <section className="mt-10">
-        <div className="mb-4 flex items-center gap-2">
-          <Package className="size-5 text-primary" />
-          <h2 className="text-lg font-bold">내가 등록한 상품</h2>
-          <Badge variant="secondary">{myProducts.length}</Badge>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Package className="size-5 text-primary" />
+            <h2 className="text-lg font-bold">내가 등록한 상품</h2>
+            <Badge variant="secondary">{visibleProducts.length}</Badge>
+          </div>
+
+          {hiddenProductIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setHiddenProductIds([])}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              숨김 초기화 ({hiddenProductIds.length})
+            </button>
+          )}
         </div>
 
-        {myProducts.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-            {myProducts.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={{
-                  id: product.id,
-                  name: product.name,
-                  price: product.price,
-                  description: product.description ?? "",
-                  image: product.image_url ?? product.imageUrl ?? "/placeholder.svg",
-                  sellerId: product.seller_id ?? product.sellerId ?? 0,
-                  sellerNickname: currentUser.nickname,
-                  createdAt: product.created_at
-                    ? new Date(product.created_at).toLocaleDateString()
-                    : "",
-                  status: product.status ?? "sale",
-                } as Product}
-              />
-            ))}
+        {paginatedProducts.length > 0 ? (
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+              {paginatedProducts.map((product) => (
+                <div key={product.id} className="relative group">
+                  <ProductCard
+                    product={{
+                      id: product.id,
+                      name: product.name,
+                      price: product.price,
+                      description: product.description ?? "",
+                      image: product.image_url ?? product.imageUrl ?? "/placeholder.svg",
+                      sellerId: product.seller_id ?? product.sellerId ?? 0,
+                      sellerNickname: currentUser.nickname,
+                      createdAt: product.created_at
+                        ? new Date(product.created_at).toLocaleDateString()
+                        : "",
+                      status: product.status ?? "sale",
+                    } as Product}
+                  />
+                  {/* 카드 우상단 숨기기 버튼 */}
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="absolute top-2 right-2 size-7 rounded-full opacity-80 hover:opacity-100 shadow-md z-10"
+                    title="상품 숨기기"
+                    onClick={() => setHiddenProductIds((prev) => [...prev, product.id])}
+                  >
+                    <EyeOff className="size-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <NumberPagination
+              currentPage={pageProducts}
+              totalPages={totalProductPages}
+              onPageChange={setPageProducts}
+            />
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed py-12 text-center">
-            <p className="text-sm text-muted-foreground">아직 등록한 상품이 없어요.</p>
+            <p className="text-sm text-muted-foreground">
+              등록한 상품이 없거나 모두 숨김 처리되었습니다.
+            </p>
             <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/sell" />}>
               상품 등록하기
             </Button>
@@ -284,37 +459,67 @@ export default function MyPage() {
         )}
       </section>
 
-      {/* 🧾 3. 내가 보낸 신청 내역 섹션 */}
+      {/* 🧾 3. 내가 신청한 내역 섹션 */}
       <section className="mt-10">
-        <div className="mb-4 flex items-center gap-2">
-          <Receipt className="size-5 text-primary" />
-          <h2 className="text-lg font-bold">내가 신청한 내역</h2>
-          <Badge variant="secondary">{applications.length}</Badge>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Receipt className="size-5 text-primary" />
+            <h2 className="text-lg font-bold">내가 신청한 내역</h2>
+            <Badge variant="secondary">{visibleApps.length}</Badge>
+          </div>
+
+          {hiddenAppIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setHiddenAppIds([])}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              숨김 초기화 ({hiddenAppIds.length})
+            </button>
+          )}
         </div>
+
         <Card>
           <CardContent className="p-0">
-            {applications.length > 0 ? (
-              <ul>
-                {applications.map((app, index) => (
-                  <li key={app.id}>
-                    {index > 0 && <Separator />}
-                    <div className="flex items-center justify-between px-4 py-3">
+            {paginatedApps.length > 0 ? (
+              <>
+                <ul className="divide-y">
+                  {paginatedApps.map((app) => (
+                    <li key={app.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/30">
                       <div>
                         <p className="text-sm font-medium">{app.productName}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           {new Date(app.appliedAt).toLocaleDateString()} 신청
                         </p>
                       </div>
-                      <span className="text-sm font-semibold text-primary">
-                        -{formatPoints(app.price)}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold text-primary">
+                          -{formatPoints(app.price)}
+                        </span>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7 text-muted-foreground hover:text-foreground"
+                          title="내역 숨기기"
+                          onClick={() => setHiddenAppIds((prev) => [...prev, app.id])}
+                        >
+                          <EyeOff className="size-3.5" />
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+
+                <NumberPagination
+                  currentPage={pageApps}
+                  totalPages={totalAppPages}
+                  onPageChange={setPageApps}
+                />
+              </>
             ) : (
               <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-                아직 신청한 상품이 없어요.
+                신청 내역이 없거나 모두 숨김 처리되었습니다.
               </p>
             )}
           </CardContent>
@@ -322,7 +527,10 @@ export default function MyPage() {
       </section>
 
       {/* 포인트 충전 모달 */}
-      <PointChargeModal isOpen={isChargeModalOpen} onClose={() => setIsChargeModalOpen(false)} />
+      <PointChargeModal
+        isOpen={isChargeModalOpen}
+        onClose={() => setIsChargeModalOpen(false)}
+      />
     </main>
   )
 }
